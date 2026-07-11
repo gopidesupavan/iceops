@@ -344,6 +344,65 @@ class TestStorageReclaimJourney:
 
 
 @pytest.fixture(scope="module")
+def tune_workspace(tmp_path_factory):
+    workspace, catalog = make_workspace(tmp_path_factory, "tune")
+    table = catalog.create_table("db.events", schema=batch(1).schema)
+    for i in range(20):  # fragmented: 20 manifests
+        table.append(batch(i * 300))
+    return workspace
+
+
+class TestTuneJourney:
+    """The flagship: one command replaces the manual maintenance pipeline."""
+
+    @pytest.fixture()
+    def workspace(self, tune_workspace):
+        return tune_workspace
+
+    def _doctor(self, workspace):
+        return json.loads(
+            iceops("doctor", "db.events", "--catalog", "e2e", "--json", cwd=workspace).stdout
+        )
+
+    def test_01_dry_run_plans_and_skips_compact_without_engine(self, workspace):
+        result = iceops("tune", "db.events", "--catalog", "e2e", cwd=workspace)
+        assert result.returncode == 1  # actionable, but dry run
+        assert "DRY RUN" in result.stdout
+        assert "skipped — no --engine" in result.stdout
+        assert self._doctor(workspace)["metrics"]["manifest_count"] == 20  # untouched
+
+    def test_02_one_command_converges_the_table(self, workspace):
+        # older-than 0s so expire acts on this fresh table too
+        result = iceops(
+            "tune", "db.events", "--catalog", "e2e", "--older-than", "0s", "--yes", cwd=workspace
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "tuned: ran" in result.stdout
+
+        report = self._doctor(workspace)
+        check_ids = {f["check_id"] for f in report["findings"]}
+        assert "manifest-fragmentation" not in check_ids
+        assert "snapshot-bloat" not in check_ids
+        assert report["metrics"]["manifest_count"] == 1
+
+        warehouse = workspace / "warehouse"
+        catalog = load_catalog(
+            "e2e",
+            type="sql",
+            uri=f"sqlite:///{warehouse}/catalog.db",
+            warehouse=f"file://{warehouse}",
+        )
+        assert catalog.load_table("db.events").scan().to_arrow().num_rows == 6000
+
+    def test_03_second_run_is_a_fixed_point(self, workspace):
+        result = iceops(
+            "tune", "db.events", "--catalog", "e2e", "--older-than", "0s", cwd=workspace
+        )
+        assert result.returncode == 0
+        assert "nothing to tune" in result.stdout
+
+
+@pytest.fixture(scope="module")
 def safety_workspace(tmp_path_factory):
     workspace, catalog = make_workspace(tmp_path_factory, "safety")
     table = catalog.create_table("db.managed", schema=batch(1).schema)

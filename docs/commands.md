@@ -157,6 +157,41 @@ Compaction rewrites data into a new snapshot but does not reclaim old physical f
 itself. Reclaim remains the normal safe lifecycle: compact, then `expire`, then
 `clean-orphans`.
 
+## iceops tune — run all maintenance in the right order
+
+```console
+$ iceops tune db.events --catalog demo
+tune db.events — maintenance in order: compact → rewrite-manifests → expire → clean-orphans
+
+▸ compact
+  skipped — no --engine (compaction needs spark or trino)
+▸ rewrite-manifests
+plan: consolidate 60 manifests … into ~1
+▸ expire
+db.events: nothing to expire (…)
+▸ clean-orphans
+db.events: nothing to clean (…)
+note: each step is planned against the current table; earlier steps change what later
+ones do. clean-orphans only deletes files past its age threshold …
+DRY RUN — nothing changed. Add --yes to execute.
+```
+
+One command for the whole loop, in the order that can't corrupt a table:
+**compact → rewrite-manifests → expire → clean-orphans**. tune adds no new behaviour — it
+composes the four operators. Two things to know:
+
+- **compact runs only with `--engine spark|trino`**; without it, tune runs the native
+  three and shows compact as skipped. No-cluster users still get most of the value.
+- **A single run won't reclaim everything immediately.** clean-orphans respects its age
+  threshold, so files this run just orphaned aren't deleted until a later run when they
+  age past it — the safe behaviour. Run tune on a schedule; each pass converges further.
+
+If a step fails, tune stops there and never runs later steps on an unexpected state
+(exit 2, `halted at <step>`).
+
+Options: `--engine spark|trino`, `--engine-catalog`, `--older-than 7d` (expire window),
+`--yes`, `--force`, `--json`.
+
 ## iceops catalogs / iceops version
 
 List configured profiles / print the version.
@@ -166,14 +201,14 @@ List configured profiles / print the version.
 ## Typical maintenance session
 
 ```console
-$ iceops scan --catalog prod                      # who needs help?
-$ iceops doctor db.events                          # what exactly is wrong?
-$ iceops compact db.events --engine spark --yes    # merge small data files
-$ iceops rewrite-manifests db.events --yes         # fix the index
-$ iceops expire db.events --yes                    # drop old versions (safe defaults)
-$ iceops clean-orphans db.events --yes             # reclaim the bytes (3d age guard)
-$ iceops scan --catalog prod                       # verify it converged
+$ iceops scan --catalog prod                       # who needs help?
+$ iceops doctor db.events                           # what exactly is wrong?
+$ iceops tune db.events --engine spark --yes        # do everything, in the right order
+$ iceops scan --catalog prod                        # verify it converged
 ```
 
-Coming next: native compact, `tune` (all of the above in the right order),
+`tune` replaces running the four fix commands by hand. Run the individual commands when
+you want fine control over one operation; run `tune` for routine maintenance.
+
+Coming next: engine backend for expire/clean/rewrite (not just compact), native compact,
 `iceops.yaml` policies + `apply`.

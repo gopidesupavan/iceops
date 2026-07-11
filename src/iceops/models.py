@@ -150,6 +150,10 @@ class ExpirePlan(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
+    @property
+    def actionable(self) -> bool:
+        return bool(self.candidates)
+
 
 class ExpireResult(BaseModel):
     plan: ExpirePlan
@@ -262,6 +266,38 @@ class CompactResult(BaseModel):
     snapshot_before: Optional[int] = None
     snapshot_after: Optional[int] = None
     status: str = "compacted"  # compacted | nothing-to-do
+
+
+class TunePlan(BaseModel):
+    """Composite of the four fix operators in maintenance order. tune holds only these
+    typed sub-plans — it never plans a mutation of its own."""
+
+    identifier: str
+    engine: Optional[str] = None
+    compact: Optional[CompactPlan] = None
+    rewrite_manifests: Optional[RewriteManifestsPlan] = None
+    expire: Optional[ExpirePlan] = None
+    clean_orphans: Optional[CleanOrphansPlan] = None
+    skipped: dict[str, str] = Field(default_factory=dict)  # step -> reason
+    generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+    @property
+    def actionable(self) -> bool:
+        return any(
+            p is not None and p.actionable
+            for p in (self.compact, self.rewrite_manifests, self.expire, self.clean_orphans)
+        )
+
+
+class TuneResult(BaseModel):
+    plan: TunePlan
+    compact: Optional[CompactResult] = None
+    rewrite_manifests: Optional[RewriteManifestsResult] = None
+    expire: Optional[ExpireResult] = None
+    clean_orphans: Optional[CleanOrphansResult] = None
+    executed: list[str] = Field(default_factory=list)
+    halted_at: Optional[str] = None
+    status: str = "tuned"  # tuned | nothing-to-do | halted
 
 
 _DURATION_RE = re.compile(r"^(\d+)\s*([smhdw])$")

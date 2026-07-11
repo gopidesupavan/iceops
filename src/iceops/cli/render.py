@@ -23,6 +23,8 @@ from ..models import (
     RewriteManifestsResult,
     Severity,
     Status,
+    TunePlan,
+    TuneResult,
     human_bytes,
 )
 
@@ -161,7 +163,9 @@ def render_cost(report: CostReport) -> None:
         console.print(f"[dim]note: {note}[/dim]")
 
 
-def render_expire_plan(plan: ExpirePlan, executed: ExpireResult | None = None) -> None:
+def render_expire_plan(
+    plan: ExpirePlan, executed: ExpireResult | None = None, show_footer: bool = True
+) -> None:
     if not plan.candidates:
         console.print(
             f"{plan.identifier}: nothing to expire "
@@ -193,7 +197,8 @@ def render_expire_plan(plan: ExpirePlan, executed: ExpireResult | None = None) -
         console.print(f"[yellow]warning: {warning}[/yellow]")
 
     if executed is None:
-        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        if show_footer:
+            console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
     else:
         console.print(
             f"[green]expired {len(executed.expired_snapshot_ids)} snapshots — "
@@ -202,7 +207,9 @@ def render_expire_plan(plan: ExpirePlan, executed: ExpireResult | None = None) -
 
 
 def render_rewrite_manifests_plan(
-    plan: RewriteManifestsPlan, executed: RewriteManifestsResult | None = None
+    plan: RewriteManifestsPlan,
+    executed: RewriteManifestsResult | None = None,
+    show_footer: bool = True,
 ) -> None:
     if not plan.actionable:
         console.print(
@@ -224,7 +231,8 @@ def render_rewrite_manifests_plan(
         console.print(f"[yellow]warning: {warning}[/yellow]")
 
     if executed is None:
-        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        if show_footer:
+            console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
     else:
         console.print(
             f"[green]rewrote manifests: {executed.manifests_before} → "
@@ -233,7 +241,9 @@ def render_rewrite_manifests_plan(
 
 
 def render_clean_orphans_plan(
-    plan: CleanOrphansPlan, executed: CleanOrphansResult | None = None
+    plan: CleanOrphansPlan,
+    executed: CleanOrphansResult | None = None,
+    show_footer: bool = True,
 ) -> None:
     skipped_note = "  ".join(f"{k}: {v}" for k, v in plan.skipped.items()) if plan.skipped else ""
     if not plan.actionable:
@@ -265,7 +275,8 @@ def render_clean_orphans_plan(
         console.print(f"[yellow]warning: {warning}[/yellow]")
 
     if executed is None:
-        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        if show_footer:
+            console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
     else:
         console.print(
             f"[green]deleted {len(executed.deleted)} files, freed "
@@ -280,7 +291,9 @@ def render_clean_orphans_plan(
             console.print(f"[dim]{len(executed.missing)} were already gone[/dim]")
 
 
-def render_compact_plan(plan: CompactPlan, executed: CompactResult | None = None) -> None:
+def render_compact_plan(
+    plan: CompactPlan, executed: CompactResult | None = None, show_footer: bool = True
+) -> None:
     if not plan.actionable:
         console.print(
             f"{plan.identifier}: nothing to compact "
@@ -310,7 +323,8 @@ def render_compact_plan(plan: CompactPlan, executed: CompactResult | None = None
         console.print(f"[yellow]warning: {warning}[/yellow]")
 
     if executed is None:
-        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        if show_footer:
+            console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
         return
 
     console.print(
@@ -328,6 +342,64 @@ def _utcnow():
     import datetime as _dt
 
     return _dt.datetime.now(_dt.timezone.utc)
+
+
+_TUNE_STEP_LABELS = {
+    "compact": "compact",
+    "rewrite_manifests": "rewrite-manifests",
+    "expire": "expire",
+    "clean_orphans": "clean-orphans",
+}
+
+
+def render_tune(plan: TunePlan, executed: TuneResult | None = None) -> None:
+    order = ["compact", "rewrite_manifests", "expire", "clean_orphans"]
+    console.print(
+        f"tune {plan.identifier} — maintenance in order: {' → '.join(_TUNE_STEP_LABELS[s] for s in order)}"
+    )
+
+    for step in order:
+        label = _TUNE_STEP_LABELS[step]
+        console.print(f"\n[bold]▸ {label}[/bold]")
+        if step in plan.skipped:
+            console.print(f"  [dim]skipped — {plan.skipped[step]}[/dim]")
+            continue
+        sub_plan = getattr(plan, step)
+        if sub_plan is None:
+            console.print("  [dim]skipped[/dim]")
+            continue
+        sub_result = getattr(executed, step) if executed else None
+        _render_sub(step, sub_plan, sub_result)
+
+    console.print(
+        "\n[dim]note: each step is planned against the current table; earlier steps change "
+        "what later ones do. clean-orphans only deletes files past its age threshold, so a "
+        "single run won't reclaim what it just orphaned.[/dim]"
+    )
+
+    if executed is None:
+        if plan.actionable:
+            console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        else:
+            console.print("[green]nothing to tune.[/green]")
+    elif executed.status == "halted":
+        halted = _TUNE_STEP_LABELS.get(executed.halted_at or "", executed.halted_at or "?")
+        console.print(f"[red]halted at {halted} — later steps did not run.[/red]")
+    else:
+        done = ", ".join(_TUNE_STEP_LABELS[s] for s in executed.executed) or "nothing"
+        console.print(f"[green]tuned: ran {done}.[/green]")
+
+
+def _render_sub(step: str, sub_plan: object, sub_result: object) -> None:
+    # suppress each step's own DRY RUN footer — tune prints one combined footer
+    if step == "compact":
+        render_compact_plan(sub_plan, executed=sub_result, show_footer=False)  # type: ignore[arg-type]
+    elif step == "rewrite_manifests":
+        render_rewrite_manifests_plan(sub_plan, executed=sub_result, show_footer=False)  # type: ignore[arg-type]
+    elif step == "expire":
+        render_expire_plan(sub_plan, executed=sub_result, show_footer=False)  # type: ignore[arg-type]
+    elif step == "clean_orphans":
+        render_clean_orphans_plan(sub_plan, executed=sub_result, show_footer=False)  # type: ignore[arg-type]
 
 
 def render_catalogs(profiles: dict[str, dict[str, Any]]) -> None:

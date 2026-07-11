@@ -52,6 +52,7 @@ Tables keep getting written to, so this is a cycle, not a pipeline — the same
 | `iceops expire <table>` | Expire old snapshots — dry-run by default, `--yes` to execute |
 | `iceops rewrite-manifests <table>` | Consolidate fragmented manifests (metadata only) — dry-run by default |
 | `iceops clean-orphans <table>` | Delete files no snapshot references — dry-run by default, age-guarded |
+| `iceops tune <table>` | Run all maintenance in the right order (compact → rewrite-manifests → expire → clean-orphans) |
 | `iceops compact <table> --engine spark` | Plan/submit data-file compaction through Spark — dry-run by default |
 | `iceops catalogs` | List configured catalog profiles |
 

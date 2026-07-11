@@ -24,13 +24,14 @@ import typer
 from .. import __version__, operators
 from ..catalog import connect
 from ..config import default_catalog_name, load_engine_config, load_profiles
-from ..errors import IceopsError, NotYetImplemented
+from ..errors import IceopsError
 from ..models import (
     CleanOrphansResult,
     CompactResult,
     ExpireResult,
     RewriteManifestsResult,
     Severity,
+    TuneResult,
     parse_duration,
     parse_size,
 )
@@ -353,6 +354,60 @@ def compact(
 
 
 @app.command()
+def tune(
+    table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
+    catalog: Optional[str] = CatalogOpt,
+    engine: Optional[str] = typer.Option(
+        None, "--engine", help="engine for the compact step (spark|trino); omit to skip compact"
+    ),
+    engine_catalog: Optional[str] = typer.Option(None, "--engine-catalog"),
+    older_than: str = typer.Option(
+        "7d", "--older-than", help="expire snapshots older than this (safe default 7d)"
+    ),
+    yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
+    force: bool = typer.Option(
+        False, "--force", help="proceed even if another optimizer manages the table"
+    ),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Run all maintenance in the right order (dry-run by default).
+
+    Sequence: compact → rewrite-manifests → expire → clean-orphans. compact runs only
+    with --engine; the other three are native. A single run won't reclaim space it just
+    orphaned — clean-orphans respects its age threshold.
+    """
+    name, identifier = _resolve(table, catalog)
+    try:
+        cutoff = parse_duration(older_than)
+    except ValueError as exc:
+        raise _fail(str(exc))
+    try:
+        outcome = operators.tune(
+            connect(name),
+            identifier,
+            engine=engine,
+            engine_catalog=engine_catalog or (name if engine else None),
+            engine_config=load_engine_config(engine) if engine else None,
+            older_than_expire=cutoff,
+            execute=yes,
+            force=force,
+        )
+    except IceopsError as exc:
+        raise _fail(str(exc))
+
+    plan = outcome.plan if isinstance(outcome, TuneResult) else outcome
+    result = outcome if isinstance(outcome, TuneResult) else None
+    if json_output:
+        print(outcome.model_dump_json(indent=2))
+    else:
+        render.render_tune(plan, executed=result)
+    if result is not None and result.status == "halted":
+        raise typer.Exit(EXIT_ERROR)
+    if not yes and plan.actionable:
+        raise typer.Exit(EXIT_FINDINGS)
+
+
+@app.command()
 def catalogs() -> None:
     """List configured catalog profiles."""
     render.render_catalogs(load_profiles())
@@ -362,23 +417,6 @@ def catalogs() -> None:
 def version() -> None:
     """Print the iceops version."""
     print(__version__)
-
-
-def _stub_command(op_name: str, fn: object) -> None:
-    @app.command(name=op_name, help=f"(v0.2) {op_name} — planned, not yet available.")
-    def _stub(
-        table: Optional[str] = typer.Argument(None),
-        catalog: Optional[str] = CatalogOpt,
-    ) -> None:
-        try:
-            fn()  # type: ignore[operator]
-        except NotYetImplemented as exc:
-            render.error_console.print(f"[yellow]{exc}[/yellow]")
-            raise typer.Exit(EXIT_ERROR)
-
-
-for _name, _fn in (("tune", operators.tune),):
-    _stub_command(_name, _fn)
 
 
 def main() -> None:
