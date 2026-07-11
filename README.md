@@ -22,6 +22,26 @@ continuously maintains Iceberg tables from your laptop, your CI, or your existin
 
 See [VISION.md](VISION.md) for goals and (importantly) non-goals.
 
+## The mental model
+
+iceops is one loop: **make the state of every Iceberg table observable, and every change
+to it reviewable.**
+
+```
+scan ──▶ plan ──▶ review ──▶ apply ──▶ verify ──▶ (back to scan)
+```
+
+| Stage | What it means | In iceops |
+| --- | --- | --- |
+| **scan** | observe reality, grade it, price it | `iceops scan` / `doctor` / `cost` |
+| **plan** | a literal listing of what *would* change | every fix command's default is a dry run |
+| **review** | a human decides — this stage is non-removable | you read the plan; in policy mode, your team reviews the `iceops.yaml` PR |
+| **apply** | execute exactly the reviewed plan, atomically | `--yes` (per command) / `iceops apply` (v0.3) |
+| **verify** | confirm the loop converged | re-run `scan` — status flips, exit codes make it CI-checkable |
+
+Tables keep getting written to, so this is a cycle, not a pipeline — the same
+`plan → review → apply` discipline as terraform, pointed at table health.
+
 ## What works today (v0.1 — read-only)
 
 | Command | What it does |
