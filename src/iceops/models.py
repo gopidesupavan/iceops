@@ -158,6 +158,29 @@ class ExpireResult(BaseModel):
     status: str = "expired"  # expired | nothing-to-do
 
 
+class RewriteManifestsPlan(BaseModel):
+    identifier: str
+    manifest_count: int = 0
+    manifest_bytes: int = 0
+    files_per_manifest: float = 0.0
+    estimated_after: int = 0
+    target_manifest_size_bytes: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+    @property
+    def actionable(self) -> bool:
+        return self.manifest_count > 1 and self.estimated_after < self.manifest_count
+
+
+class RewriteManifestsResult(BaseModel):
+    plan: RewriteManifestsPlan
+    manifests_before: int = 0
+    manifests_after: int = 0
+    new_snapshot_id: Optional[int] = None
+    status: str = "rewritten"  # rewritten | nothing-to-do
+
+
 class Action(BaseModel):
     op: str
     table: str
@@ -188,6 +211,19 @@ def parse_duration(text: str) -> dt.timedelta:
         raise ValueError(f"invalid duration '{text}' (expected <number><unit>, units: s m h d w)")
     value, unit = match.groups()
     return dt.timedelta(seconds=int(value) * _DURATION_SECONDS[unit])
+
+
+_SIZE_RE = re.compile(r"^(\d+)\s*(b|kb|mb|gb)$")
+_SIZE_BYTES = {"b": 1, "kb": 1024, "mb": 1024**2, "gb": 1024**3}
+
+
+def parse_size(text: str) -> int:
+    """Parse '512MB', '8mb', '64KB' style sizes (powers of 1024)."""
+    match = _SIZE_RE.match(text.strip().lower())
+    if not match:
+        raise ValueError(f"invalid size '{text}' (expected <number><unit>, units: B KB MB GB)")
+    value, unit = match.groups()
+    return int(value) * _SIZE_BYTES[unit]
 
 
 def human_bytes(n: Optional[int]) -> str:

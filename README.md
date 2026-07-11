@@ -50,6 +50,7 @@ Tables keep getting written to, so this is a cycle, not a pipeline — the same
 | `iceops doctor <table>` | Deep single-table report: file-size histogram, snapshot bloat, manifest fragmentation, delete-file ratio, partition skew |
 | `iceops cost <table>` | Estimated wasted storage $ from unexpired snapshots and orphaned files |
 | `iceops expire <table>` | Expire old snapshots — dry-run by default, `--yes` to execute |
+| `iceops rewrite-manifests <table>` | Consolidate fragmented manifests (metadata only) — dry-run by default |
 | `iceops catalogs` | List configured catalog profiles |
 
 Every command supports `--json` for machine consumption, and exit codes are CI-friendly
@@ -60,9 +61,9 @@ Every command supports `--json` for machine consumption, and exit codes are CI-f
 which snapshots go and how many bytes become unreferenced. A snapshot is only expired if
 it is BOTH beyond `--retain-last` AND older than `--older-than`.
 
-Remaining fix operators (`compact`, `clean-orphans`, `rewrite-manifests`, `tune`) land
-next, dry-run by default; declarative policy (`iceops.yaml` + `iceops apply`) in v0.3; a
-stateless HTTP API (`iceops serve`) in v0.4.
+Remaining fix operators (`clean-orphans`, `compact`, `tune`) land next, dry-run by
+default; declarative policy (`iceops.yaml` + `iceops apply`) in v0.3; a stateless HTTP
+API (`iceops serve`) in v0.4.
 
 ## Quickstart with a local demo lakehouse
 

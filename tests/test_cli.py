@@ -87,6 +87,40 @@ def test_expire_cli_dry_run_then_execute(seeded_catalog):
     assert "nothing to expire" in again.stdout
 
 
+def test_rewrite_manifests_cli_dry_run_then_execute(seeded_catalog):
+    import pyarrow as pa
+
+    name = "db.fragcli"
+    try:
+        seeded_catalog.drop_table(name)
+    except Exception:
+        pass
+    batch = pa.table({"id": pa.array(range(10), type=pa.int64())})
+    table = seeded_catalog.create_table(name, schema=batch.schema)
+    for _ in range(4):
+        table.append(batch)
+
+    dry = runner.invoke(app, ["rewrite-manifests", name, "--catalog", "test"])
+    assert dry.exit_code == 1
+    assert "DRY RUN" in dry.stdout
+    assert "consolidate 4 manifests" in dry.stdout
+
+    run = runner.invoke(app, ["rewrite-manifests", name, "--catalog", "test", "--yes"])
+    assert run.exit_code == 0
+    assert "rewrote manifests: 4 → 1" in run.stdout
+
+    again = runner.invoke(app, ["rewrite-manifests", name, "--catalog", "test"])
+    assert again.exit_code == 0
+    assert "nothing to rewrite" in again.stdout
+
+
+def test_rewrite_manifests_cli_bad_size(seeded_catalog):
+    result = runner.invoke(
+        app, ["rewrite-manifests", "db.messy", "--catalog", "test", "--target-manifest-size", "8xb"]
+    )
+    assert result.exit_code == 2
+
+
 def test_expire_cli_bad_duration(seeded_catalog):
     result = runner.invoke(app, ["expire", "db.messy", "--catalog", "test", "--older-than", "7x"])
     assert result.exit_code == 2

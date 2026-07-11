@@ -15,6 +15,8 @@ from ..models import (
     Finding,
     FleetReport,
     HealthReport,
+    RewriteManifestsPlan,
+    RewriteManifestsResult,
     Severity,
     Status,
     human_bytes,
@@ -192,6 +194,37 @@ def render_expire_plan(plan: ExpirePlan, executed: ExpireResult | None = None) -
         console.print(
             f"[green]expired {len(executed.expired_snapshot_ids)} snapshots — "
             f"{executed.snapshot_count_after} remain[/green]"
+        )
+
+
+def render_rewrite_manifests_plan(
+    plan: RewriteManifestsPlan, executed: RewriteManifestsResult | None = None
+) -> None:
+    if not plan.actionable:
+        console.print(
+            f"{plan.identifier}: nothing to rewrite ({plan.manifest_count} manifests, "
+            f"already at or below the ~{human_bytes(plan.target_manifest_size_bytes)} target)"
+        )
+        return
+
+    console.print(
+        f"plan: consolidate {plan.manifest_count} manifests "
+        f"({human_bytes(plan.manifest_bytes)}, ~{plan.files_per_manifest} data files each) "
+        f"into ~{plan.estimated_after}"
+    )
+    console.print(
+        "[dim]metadata only — no data files are read or written; one new snapshot is "
+        "created and the previous one remains for rollback[/dim]"
+    )
+    for warning in plan.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if executed is None:
+        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+    else:
+        console.print(
+            f"[green]rewrote manifests: {executed.manifests_before} → "
+            f"{executed.manifests_after} (snapshot {executed.new_snapshot_id})[/green]"
         )
 
 

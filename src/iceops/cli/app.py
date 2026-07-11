@@ -13,7 +13,7 @@ from .. import __version__, operators
 from ..catalog import connect
 from ..config import default_catalog_name, load_profiles
 from ..errors import IceopsError, NotYetImplemented
-from ..models import ExpireResult, Severity, parse_duration
+from ..models import ExpireResult, RewriteManifestsResult, Severity, parse_duration, parse_size
 from . import render
 
 EXIT_OK = 0
@@ -180,6 +180,52 @@ def expire(
         raise typer.Exit(EXIT_FINDINGS)  # work is planned but nothing was done
 
 
+@app.command(name="rewrite-manifests")
+def rewrite_manifests_cmd(
+    table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
+    catalog: Optional[str] = CatalogOpt,
+    target_manifest_size: str = typer.Option(
+        "8MB", "--target-manifest-size", help="bin-pack manifests to roughly this size"
+    ),
+    yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
+    force: bool = typer.Option(
+        False, "--force", help="proceed even if another optimizer manages the table"
+    ),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Consolidate fragmented manifests (metadata only; dry-run by default).
+
+    Fixes the manifest-fragmentation finding: many small manifests make query planning
+    slow. No data files are touched; one new snapshot is created.
+    """
+    name, identifier = _resolve(table, catalog)
+    try:
+        target = parse_size(target_manifest_size)
+    except ValueError as exc:
+        raise _fail(str(exc))
+    try:
+        outcome = operators.rewrite_manifests(
+            connect(name),
+            identifier,
+            target_manifest_size=target,
+            execute=yes,
+            force=force,
+        )
+    except IceopsError as exc:
+        raise _fail(str(exc))
+
+    plan = outcome.plan if isinstance(outcome, RewriteManifestsResult) else outcome
+    result = outcome if isinstance(outcome, RewriteManifestsResult) else None
+    if json_output:
+        print(outcome.model_dump_json(indent=2))
+    else:
+        render.render_rewrite_manifests_plan(
+            plan, executed=result if result and result.status == "rewritten" else None
+        )
+    if not yes and plan.actionable:
+        raise typer.Exit(EXIT_FINDINGS)  # work is planned but nothing was done
+
+
 @app.command()
 def catalogs() -> None:
     """List configured catalog profiles."""
@@ -208,7 +254,6 @@ def _stub_command(op_name: str, fn: object) -> None:
 for _name, _fn in (
     ("compact", operators.compact),
     ("clean-orphans", operators.clean_orphans),
-    ("rewrite-manifests", operators.rewrite_manifests),
     ("tune", operators.tune),
 ):
     _stub_command(_name, _fn)
