@@ -55,7 +55,8 @@ Tables keep getting written to, so this is a cycle, not a pipeline — the same
 | `iceops catalogs` | List configured catalog profiles |
 
 Every command supports `--json` for machine consumption, and exit codes are CI-friendly
-(0 = healthy/done, 1 = findings or planned-but-dry-run, 2 = error).
+(0 = healthy/done, 1 = findings or planned-but-dry-run, 2 = error). Full options and
+example output for every command: **[docs/commands.md](docs/commands.md)**.
 
 `expire` never deletes files: it unreferences old snapshots atomically via PyIceberg
 (branch/tag heads and the current snapshot are always protected) and reports exactly
