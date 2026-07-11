@@ -87,7 +87,8 @@ class HealthReport(BaseModel):
     streaming_writer: bool = False
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
-    @computed_field  # included in --json output
+    # mypy can't type decorators above @property (pydantic-docs-sanctioned ignore)
+    @computed_field  # type: ignore[prop-decorator]  # included in --json output
     @property
     def status(self) -> Status:
         """info findings are advice, not problems — they never change the status."""

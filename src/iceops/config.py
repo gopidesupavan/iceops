@@ -14,10 +14,11 @@ reach, iceops can reach.
 from __future__ import annotations
 
 import os
+import sys
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:
+else:
     import tomli as tomllib
 from pathlib import Path
 from typing import Any
