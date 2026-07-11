@@ -1,0 +1,175 @@
+"""iceops CLI — a thin Typer skin over the operator library.
+
+Exit codes: 0 = healthy, 1 = findings (warn or critical), 2 = error / not yet available.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+import typer
+
+from .. import __version__, operators
+from ..catalog import connect
+from ..config import default_catalog_name, load_profiles
+from ..errors import IceopsError, NotYetImplemented
+from ..models import Severity
+from . import render
+
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_ERROR = 2
+
+app = typer.Typer(
+    name="iceops",
+    help="Doctor, janitor, and autopilot for Apache Iceberg tables.",
+    no_args_is_help=True,
+    add_completion=True,
+)
+
+CatalogOpt = typer.Option(None, "--catalog", "-c", help="catalog profile name")
+JsonOpt = typer.Option(False, "--json", help="emit machine-readable JSON instead of tables")
+
+
+def _fail(message: str) -> "typer.Exit":
+    render.error_console.print(f"[red]error:[/red] {message}")
+    return typer.Exit(EXIT_ERROR)
+
+
+def _resolve(identifier: str, catalog_name: Optional[str]) -> tuple[str, str]:
+    """Work out (catalog profile, table identifier).
+
+    Accepts --catalog plus 'ns.table', or a fully qualified 'catalog.ns.table' whose
+    first segment matches a configured profile. With a single configured profile,
+    --catalog can be omitted entirely.
+    """
+    if catalog_name:
+        return catalog_name, identifier
+    parts = identifier.split(".")
+    if len(parts) >= 3 and parts[0] in load_profiles():
+        return parts[0], ".".join(parts[1:])
+    default = default_catalog_name()
+    if default:
+        return default, identifier
+    raise _fail(
+        f"cannot tell which catalog owns '{identifier}' — pass --catalog or use "
+        f"'<catalog>.<namespace>.<table>'"
+    )
+
+
+def _resolve_catalog(catalog_name: Optional[str]) -> str:
+    if catalog_name:
+        return catalog_name
+    default = default_catalog_name()
+    if default:
+        return default
+    raise _fail("pass --catalog (multiple or zero profiles are configured)")
+
+
+def _has_actionable_findings(*severities: Severity) -> bool:
+    return any(s in (Severity.WARN, Severity.CRITICAL) for s in severities)
+
+
+@app.command()
+def scan(
+    catalog: Optional[str] = CatalogOpt,
+    pattern: str = typer.Option("*", "--pattern", "-p", help="glob over 'ns.table' names"),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Fleet-wide health report: one status row per table."""
+    name = _resolve_catalog(catalog)
+    try:
+        report = operators.scan(connect(name), name, pattern)
+    except IceopsError as exc:
+        raise _fail(str(exc))
+    if json_output:
+        print(report.model_dump_json(indent=2))
+    else:
+        render.render_fleet(report)
+    findings = [f.severity for r in report.reports for f in r.findings]
+    if report.errors or _has_actionable_findings(*findings):
+        raise typer.Exit(EXIT_FINDINGS)
+
+
+@app.command()
+def doctor(
+    table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
+    catalog: Optional[str] = CatalogOpt,
+    json_output: bool = JsonOpt,
+) -> None:
+    """Deep health report for one table."""
+    name, identifier = _resolve(table, catalog)
+    try:
+        report = operators.doctor(connect(name), identifier)
+    except IceopsError as exc:
+        raise _fail(str(exc))
+    if json_output:
+        print(report.model_dump_json(indent=2))
+    else:
+        render.render_health(report)
+    if _has_actionable_findings(*(f.severity for f in report.findings)):
+        raise typer.Exit(EXIT_FINDINGS)
+
+
+@app.command()
+def cost(
+    table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
+    catalog: Optional[str] = CatalogOpt,
+    dollars_per_gb_month: float = typer.Option(
+        0.023, "--dollars-per-gb-month", help="storage price used for the estimate"
+    ),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Estimate wasted storage cost from stale snapshots and orphaned files."""
+    name, identifier = _resolve(table, catalog)
+    try:
+        report = operators.cost(connect(name), identifier, dollars_per_gb_month)
+    except IceopsError as exc:
+        raise _fail(str(exc))
+    if json_output:
+        print(report.model_dump_json(indent=2))
+    else:
+        render.render_cost(report)
+
+
+@app.command()
+def catalogs() -> None:
+    """List configured catalog profiles."""
+    render.render_catalogs(load_profiles())
+
+
+@app.command()
+def version() -> None:
+    """Print the iceops version."""
+    print(__version__)
+
+
+def _stub_command(op_name: str, fn: object) -> None:
+    @app.command(name=op_name, help=f"(v0.2) {op_name} — planned, not yet available.")
+    def _stub(
+        table: Optional[str] = typer.Argument(None),
+        catalog: Optional[str] = CatalogOpt,
+    ) -> None:
+        try:
+            fn()  # type: ignore[operator]
+        except NotYetImplemented as exc:
+            render.error_console.print(f"[yellow]{exc}[/yellow]")
+            raise typer.Exit(EXIT_ERROR)
+
+
+for _name, _fn in (
+    ("compact", operators.compact),
+    ("expire", operators.expire),
+    ("clean-orphans", operators.clean_orphans),
+    ("rewrite-manifests", operators.rewrite_manifests),
+    ("tune", operators.tune),
+):
+    _stub_command(_name, _fn)
+
+
+def main() -> None:
+    app()
+
+
+if __name__ == "__main__":
+    main()

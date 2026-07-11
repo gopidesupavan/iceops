@@ -1,0 +1,20 @@
+# Example iceops policy — maintenance as code (executable from v0.3 via `iceops apply`).
+# Check this file into your repo next to your pipelines; any scheduler can run it.
+
+catalog: prod
+
+tables:
+  - "db.events*"
+  - "db.orders"
+
+policy:
+  compact:
+    target-file-size: 512MB
+    when: small-file-ratio > 0.3
+
+  expire-snapshots:
+    retain-last: 10
+    older-than: 7d
+
+  clean-orphans:
+    older-than: 3d
