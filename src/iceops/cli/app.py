@@ -23,10 +23,11 @@ import typer
 
 from .. import __version__, operators
 from ..catalog import connect
-from ..config import default_catalog_name, load_profiles
+from ..config import default_catalog_name, load_engine_config, load_profiles
 from ..errors import IceopsError, NotYetImplemented
 from ..models import (
     CleanOrphansResult,
+    CompactResult,
     ExpireResult,
     RewriteManifestsResult,
     Severity,
@@ -299,6 +300,59 @@ def clean_orphans_cmd(
 
 
 @app.command()
+def compact(
+    table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
+    catalog: Optional[str] = CatalogOpt,
+    engine: str = typer.Option(
+        ..., "--engine", help="execution engine: spark or trino (native not yet available)"
+    ),
+    engine_catalog: Optional[str] = typer.Option(
+        None,
+        "--engine-catalog",
+        help="catalog name visible to the engine (defaults to the iceops catalog profile)",
+    ),
+    target_file_size: str = typer.Option(
+        "512MB", "--target-file-size", help="engine target file size for compacted files"
+    ),
+    yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
+    force: bool = typer.Option(
+        False, "--force", help="proceed even if another optimizer manages the table"
+    ),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Compact small data files through Spark or Trino (dry-run by default)."""
+    name, identifier = _resolve(table, catalog)
+    try:
+        target = parse_size(target_file_size)
+    except ValueError as exc:
+        raise _fail(str(exc))
+    try:
+        outcome = operators.compact(
+            connect(name),
+            identifier,
+            target_file_size=target,
+            engine=engine,
+            engine_catalog=engine_catalog or name,
+            engine_config=load_engine_config(engine),
+            execute=yes,
+            force=force,
+        )
+    except IceopsError as exc:
+        raise _fail(str(exc))
+
+    plan = outcome.plan if isinstance(outcome, CompactResult) else outcome
+    result = outcome if isinstance(outcome, CompactResult) else None
+    if json_output:
+        print(outcome.model_dump_json(indent=2))
+    else:
+        render.render_compact_plan(
+            plan, executed=result if result and result.action_results else None
+        )
+    if not yes and plan.actionable:
+        raise typer.Exit(EXIT_FINDINGS)  # work is planned but nothing was done
+
+
+@app.command()
 def catalogs() -> None:
     """List configured catalog profiles."""
     render.render_catalogs(load_profiles())
@@ -323,10 +377,7 @@ def _stub_command(op_name: str, fn: object) -> None:
             raise typer.Exit(EXIT_ERROR)
 
 
-for _name, _fn in (
-    ("compact", operators.compact),
-    ("tune", operators.tune),
-):
+for _name, _fn in (("tune", operators.tune),):
     _stub_command(_name, _fn)
 
 

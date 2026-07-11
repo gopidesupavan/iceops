@@ -42,6 +42,16 @@ def config_paths() -> list[Path]:
 
 def load_profiles() -> dict[str, dict[str, Any]]:
     """Merge profiles from all config files; earlier paths win on name clashes."""
+    return _load_section("catalogs")
+
+
+def load_engine_config(name: str) -> dict[str, Any]:
+    """Load one [engines.<name>] block from iceops config files."""
+    return _load_section("engines").get(name, {})
+
+
+def _load_section(section: str) -> dict[str, dict[str, Any]]:
+    """Merge a top-level config section; earlier paths win on name clashes."""
     profiles: dict[str, dict[str, Any]] = {}
     for path in reversed(config_paths()):
         if not path.is_file():
@@ -50,9 +60,9 @@ def load_profiles() -> dict[str, dict[str, Any]]:
             doc = tomllib.loads(path.read_text())
         except tomllib.TOMLDecodeError as exc:
             raise CatalogProfileError(f"invalid TOML in {path}: {exc}") from exc
-        for name, props in doc.get("catalogs", {}).items():
+        for name, props in doc.get(section, {}).items():
             if not isinstance(props, dict):
-                raise CatalogProfileError(f"[catalogs.{name}] in {path} must be a table")
+                raise CatalogProfileError(f"[{section}.{name}] in {path} must be a table")
             profiles[name] = props
     return profiles
 

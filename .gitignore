@@ -9,7 +9,11 @@ build/
 .coverage
 htmlcov/
 demo_warehouse/
+spark_lab_warehouse/
+spark_connect_lab_warehouse/
 .iceops.toml
+.iceops.spark-lab.toml
+.iceops.spark-connect-lab.toml
 .DS_Store
 
 # internal planning material — never published

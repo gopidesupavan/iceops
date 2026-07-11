@@ -11,6 +11,8 @@ from rich.text import Text
 from ..models import (
     CleanOrphansPlan,
     CleanOrphansResult,
+    CompactPlan,
+    CompactResult,
     CostReport,
     ExpirePlan,
     ExpireResult,
@@ -276,6 +278,50 @@ def render_clean_orphans_plan(
             )
         if executed.missing:
             console.print(f"[dim]{len(executed.missing)} were already gone[/dim]")
+
+
+def render_compact_plan(plan: CompactPlan, executed: CompactResult | None = None) -> None:
+    if not plan.actionable:
+        console.print(
+            f"{plan.identifier}: nothing to compact "
+            f"({plan.data_file_count} data files, {plan.delete_file_count} delete files, "
+            f"target {human_bytes(plan.target_file_size_bytes)})"
+        )
+        return
+
+    console.print(
+        f"plan: compact {plan.small_file_count} small files in {plan.identifier} "
+        f"with {plan.engine} (target {human_bytes(plan.target_file_size_bytes)})"
+    )
+    if plan.delete_file_count:
+        console.print(
+            f"  {plan.delete_file_count} delete files present — the engine owns "
+            "delete-aware rewrite semantics"
+        )
+    console.print(
+        f"  engine catalog: {plan.engine_catalog or '?'} · snapshot: "
+        f"{plan.current_snapshot_id or '?'}"
+    )
+    console.print(
+        "[dim]engine dry-run is an estimate: Spark/Trino choose the exact rewrite "
+        "files internally; storage reclaim still requires expire then clean-orphans[/dim]"
+    )
+    for warning in plan.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if executed is None:
+        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        return
+
+    console.print(
+        f"[green]submitted compact via {plan.engine}: "
+        f"{executed.data_files_before} → "
+        f"{executed.data_files_after if executed.data_files_after is not None else '?'} "
+        "data files[/green]"
+    )
+    for result in executed.action_results:
+        for key, value in sorted(result.details.items()):
+            console.print(f"  {key}: {value}")
 
 
 def _utcnow():

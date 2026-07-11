@@ -49,9 +49,42 @@ def test_cost_json(seeded_catalog):
     assert payload["live_bytes"] > 0
 
 
-def test_stub_commands_exit_nonzero(seeded_catalog):
+def test_native_compact_is_still_not_implemented(seeded_catalog):
     result = runner.invoke(app, ["compact", "db.messy", "--catalog", "test"])
     assert result.exit_code == 2
+
+
+def test_spark_compact_cli_dry_run(seeded_catalog):
+    result = runner.invoke(
+        app,
+        [
+            "compact",
+            "db.messy",
+            "--catalog",
+            "test",
+            "--engine",
+            "spark",
+            "--target-file-size",
+            "128MB",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "DRY RUN" in result.stdout
+    assert "with spark" in result.stdout
+    assert "engine dry-run is an estimate" in result.stdout
+
+
+def test_spark_compact_cli_json_plan(seeded_catalog):
+    result = runner.invoke(
+        app, ["compact", "db.messy", "--catalog", "test", "--engine", "spark", "--json"]
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["identifier"] == "db.messy"
+    assert payload["engine"] == "spark"
+    assert payload["engine_catalog"] == "test"
+    assert payload["action"]["op"] == "compact"
+    assert payload["action"]["params"]["target_file_size_bytes"] == 512 * 1024 * 1024
 
 
 def test_expire_cli_dry_run_then_execute(seeded_catalog):

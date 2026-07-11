@@ -42,7 +42,7 @@ scan ──▶ plan ──▶ review ──▶ apply ──▶ verify ──▶ 
 Tables keep getting written to, so this is a cycle, not a pipeline — the same
 `plan → review → apply` discipline as terraform, pointed at table health.
 
-## What works today (v0.1 — read-only)
+## What works today
 
 | Command | What it does |
 | --- | --- |
@@ -52,6 +52,7 @@ Tables keep getting written to, so this is a cycle, not a pipeline — the same
 | `iceops expire <table>` | Expire old snapshots — dry-run by default, `--yes` to execute |
 | `iceops rewrite-manifests <table>` | Consolidate fragmented manifests (metadata only) — dry-run by default |
 | `iceops clean-orphans <table>` | Delete files no snapshot references — dry-run by default, age-guarded |
+| `iceops compact <table> --engine spark` | Plan/submit data-file compaction through Spark — dry-run by default |
 | `iceops catalogs` | List configured catalog profiles |
 
 Every command supports `--json` for machine consumption, and exit codes are CI-friendly
@@ -70,9 +71,11 @@ files younger than `--older-than` (default 3d — an in-flight write can look or
 supports `--exclude` globs, and re-verifies table metadata before every delete batch in
 case a writer committed mid-run.
 
-Remaining fix operators (`compact`, `tune`) land next, dry-run by default; declarative
-policy (`iceops.yaml` + `iceops apply`) in v0.3; a stateless HTTP API (`iceops serve`)
-in v0.4.
+`compact` is federated first: iceops plans and renders the action, while Spark/Trino own
+the data-file rewrite. Storage reclaim still flows through `expire` then
+`clean-orphans`; compact never deletes physical files directly. Native Arrow compaction
+and `tune` land next; declarative policy (`iceops.yaml` + `iceops apply`) in v0.3; a
+stateless HTTP API (`iceops serve`) in v0.4.
 
 ## Quickstart with a local demo lakehouse
 
@@ -82,6 +85,21 @@ $ uv run python examples/demo.py      # builds a deliberately unhealthy local wa
 $ uv run iceops scan --catalog demo
 $ uv run iceops doctor db.events --catalog demo
 $ uv run iceops cost db.events --catalog demo
+```
+
+To verify Spark-backed compaction locally:
+
+```console
+$ uv sync --extra spark
+$ uv run python examples/spark_lab.py
+$ ICEOPS_CONFIG=.iceops.spark-lab.toml uv run iceops compact db.events --catalog sparklab --engine spark --yes
+```
+
+To verify the Spark Connect client path:
+
+```console
+$ uv run python examples/spark_connect_lab.py
+$ ICEOPS_CONFIG=.iceops.spark-connect-lab.toml uv run iceops compact db.events --catalog sparkconnectlab --engine spark --yes
 ```
 
 ## Connecting to your catalog
@@ -100,6 +118,14 @@ credential = "…"
 type = "sql"
 uri = "sqlite:///demo_warehouse/catalog.db"
 warehouse = "file://demo_warehouse"
+
+[engines.spark]
+master = "local[*]"
+# or: remote_uri = "sc://spark-connect-host:15002"
+# Spark catalog settings can be passed through as quoted TOML keys, for example:
+# "spark.sql.catalog.demo" = "org.apache.iceberg.spark.SparkCatalog"
+# "spark.sql.catalog.demo.type" = "hadoop"
+# "spark.sql.catalog.demo.warehouse" = "file:///path/to/warehouse"
 ```
 
 Any Iceberg REST-spec catalog works: Polaris, Nessie, Gravitino, Lakekeeper. AWS Glue via

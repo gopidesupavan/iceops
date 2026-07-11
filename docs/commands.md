@@ -4,9 +4,10 @@ Minimal reference for everything shipped today. Every command supports `--json` 
 machine-readable output. Exit codes everywhere: `0` healthy / done / nothing to do,
 `1` findings exist or work was planned but not executed (dry run), `2` error.
 
-Fix commands (`expire`, `rewrite-manifests`, `clean-orphans`) are **dry-run by
-default** — they print exactly what would happen and change nothing until `--yes`.
-They refuse tables managed by another optimizer (Amoro, S3 Tables, …) unless `--force`.
+Fix commands (`expire`, `rewrite-manifests`, `clean-orphans`, `compact`) are
+**dry-run by default** — they print exactly what would happen and change nothing until
+`--yes`. They refuse tables managed by another optimizer (Amoro, S3 Tables, …) unless
+`--force`.
 
 ## Setup
 
@@ -21,13 +22,22 @@ uri = "https://polaris.example.com/api/catalog"
 type = "sql"
 uri = "sqlite:///demo_warehouse/catalog.db"
 warehouse = "file://demo_warehouse"
+
+[engines.spark]
+master = "local[*]"
+# or: remote_uri = "sc://spark-connect-host:15002"
 ```
 
 Unknown names fall through to [PyIceberg's own config](https://py.iceberg.apache.org/configuration/).
 With a single profile configured, `--catalog` can be omitted. Tables are addressed as
 `namespace.table` or fully qualified `catalog.namespace.table`.
 
-Try everything against a local demo lakehouse: `uv run python examples/demo.py`
+Try everything against a local demo lakehouse: `uv run python examples/demo.py`.
+For a real Spark-backed compaction lab: `uv sync --extra spark`, then
+`uv run python examples/spark_lab.py`. For Spark Connect local mode:
+`uv run python examples/spark_connect_lab.py`. Gated verification tests:
+`ICEOPS_RUN_SPARK=1 uv run pytest tests/integration/test_spark_compact_lab.py` and
+`ICEOPS_RUN_SPARK_CONNECT=1 uv run pytest tests/integration/test_spark_connect_compact_lab.py`.
 
 ---
 
@@ -117,6 +127,27 @@ are never deleted (in-flight writes can look orphaned); `--exclude '_SUCCESS'`
 (repeatable) protects extra patterns; the table is re-checked before every delete batch
 in case a writer committed mid-run.
 
+## iceops compact — federated data-file compaction
+
+```console
+$ iceops compact db.events --catalog demo --engine spark --target-file-size 512MB
+plan: compact 60 small files in db.events with spark (target 512.0MB)
+  engine catalog: demo · snapshot: 7402711359425541986
+engine dry-run is an estimate: Spark/Trino choose the exact rewrite files internally
+DRY RUN — nothing changed. Add --yes to execute.
+```
+
+`compact` is engine-backed in this slice. iceops plans and submits one engine action;
+Spark executes Iceberg `rewrite_data_files`, and Trino support uses `ALTER TABLE …
+EXECUTE optimize`. Native Arrow compaction remains not-yet-implemented.
+
+Options: `--engine spark|trino|native`, `--engine-catalog <name>`,
+`--target-file-size 512MB`, `--yes`, `--force`, `--json`.
+
+Compaction rewrites data into a new snapshot but does not reclaim old physical files by
+itself. Reclaim remains the normal safe lifecycle: compact, then `expire`, then
+`clean-orphans`.
+
 ## iceops catalogs / iceops version
 
 List configured profiles / print the version.
@@ -128,11 +159,12 @@ List configured profiles / print the version.
 ```console
 $ iceops scan --catalog prod                      # who needs help?
 $ iceops doctor db.events                          # what exactly is wrong?
+$ iceops compact db.events --engine spark --yes    # merge small data files
 $ iceops rewrite-manifests db.events --yes         # fix the index
 $ iceops expire db.events --yes                    # drop old versions (safe defaults)
 $ iceops clean-orphans db.events --yes             # reclaim the bytes (3d age guard)
 $ iceops scan --catalog prod                       # verify it converged
 ```
 
-Coming next: `compact` (merge small data files), `tune` (all of the above in the right
-order), `iceops.yaml` policies + `apply`.
+Coming next: native compact, `tune` (all of the above in the right order),
+`iceops.yaml` policies + `apply`.

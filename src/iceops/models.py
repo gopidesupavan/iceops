@@ -233,6 +233,37 @@ class ActionResult(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class CompactPlan(BaseModel):
+    identifier: str
+    engine: str = "native"
+    engine_catalog: Optional[str] = None
+    target_file_size_bytes: int = 512 * 1024 * 1024
+    data_file_count: int = 0
+    delete_file_count: int = 0
+    small_file_count: int = 0
+    total_data_bytes: int = 0
+    current_snapshot_id: Optional[int] = None
+    action: Optional[Action] = None
+    warnings: list[str] = Field(default_factory=list)
+    generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+    @property
+    def actionable(self) -> bool:
+        return self.small_file_count > 1 or self.delete_file_count > 0
+
+
+class CompactResult(BaseModel):
+    plan: CompactPlan
+    action_results: list[ActionResult] = Field(default_factory=list)
+    data_files_before: int = 0
+    data_files_after: Optional[int] = None
+    delete_files_before: int = 0
+    delete_files_after: Optional[int] = None
+    snapshot_before: Optional[int] = None
+    snapshot_after: Optional[int] = None
+    status: str = "compacted"  # compacted | nothing-to-do
+
+
 _DURATION_RE = re.compile(r"^(\d+)\s*([smhdw])$")
 _DURATION_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 
