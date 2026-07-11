@@ -37,3 +37,20 @@ jobs:
 
       - name: Integration tests
         run: uv run pytest tests/integration -q
+
+  e2e:
+    name: e2e journeys (real CLI subprocess)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: End-to-end journeys
+        run: uv run pytest tests/e2e -q
