@@ -1,6 +1,18 @@
 """iceops CLI — a thin Typer skin over the operator library.
 
-Exit codes: 0 = healthy, 1 = findings (warn or critical), 2 = error / not yet available.
+EVERY COMMAND FOLLOWS THE SAME FLOW
+    1. resolve which catalog owns the table (`_resolve`): --catalog flag, or a
+       'catalog.ns.table' prefix matching a profile, or the single configured profile
+    2. parse human inputs (durations '7d', sizes '8MB') — fail fast with exit 2
+    3. call the operator (all logic lives in iceops.operators; none here)
+    4. render the returned model via render.py, or dump it with --json
+    5. exit code: 0 = healthy / done / nothing to do,
+                  1 = findings exist or work was planned but this was a dry run,
+                  2 = error (CI scripts key on these)
+
+Fix commands share one convention enforced by the operators themselves: dry-run unless
+--yes, refuse externally-managed tables unless --force. Not-yet-built operators are
+registered as stubs that print the roadmap instead of "no such command".
 """
 
 from __future__ import annotations

@@ -1,10 +1,42 @@
 """Manifest consolidation — fixes manifest fragmentation (metadata-only).
 
-Fully native execution, discovered by probe (design/plan-v0.2-manifests.md): one atomic
-transaction that temporarily enables PyIceberg's commit-time manifest merging, commits an
-*empty* merge-append (a new APPEND snapshot referencing the same data files through
-consolidated manifests), and restores the original merge properties. No data files are
-read or written; the previous snapshot survives, so rollback is always possible.
+WHY THIS EXISTS
+    Every append adds a manifest (the table's "index booklet"). A table written 60 times
+    has 60 manifests of ~1 file each; query planning must open every one. This operator
+    consolidates them into few large manifests. Data files are NEVER read or written —
+    only the index is reorganized. The previous snapshot survives, so the operation is
+    always rollbackable.
+
+HOW IT WORKS — THE FLOW
+
+    plan (read-only, `_build_plan`):
+      1. `table.inspect.manifests()` → count, byte sizes, partition-spec ids
+      2. group manifests by partition spec (specs never merge across each other)
+      3. estimate after-count: bin-pack each group to --target-manifest-size
+         (`estimate_after`, pure function)
+      4. not actionable when 0/1 manifests or already consolidated
+
+    execute (`_execute` → `_commit_rewrite`) — ONE atomic transaction:
+      5. remember the table's current `commit.manifest*` properties (user may have set them)
+      6. inside a single transaction:
+           a. set  commit.manifest-merge.enabled=true, min-count-to-merge=2, target-size=N
+           b. commit an EMPTY merge-append — zero data files appended. PyIceberg's own
+              `_ManifestMergeManager` sees the properties, bin-packs ALL existing
+              manifests, and rewrites them through its native ManifestWriter. This is
+              the whole trick: we never encode Avro ourselves; we trigger the library's
+              commit-time merging with nothing to append.
+           c. restore every property to the remembered value (remove if it wasn't set)
+         → the commit produces ONE new APPEND snapshot: same data files, new index,
+           and no property changes left behind (all-or-nothing with the merge itself)
+      7. on commit conflict (concurrent writer): refresh, retry once, then fail loudly —
+         a failed attempt leaves only orphaned manifest files, reclaimable by clean-orphans
+
+    post-verify (`_verify_unchanged`) — distrust our own commit before declaring success:
+      8. reload the table; assert the live data-file path set and total row count are
+         byte-for-byte identical, and no merge property leaked. On any mismatch: raise
+         with rollback instructions (the pre-rewrite snapshot still exists).
+
+Discovered by probe against PyIceberg 0.11.1 source — see design/plan-v0.2-manifests.md.
 """
 
 from __future__ import annotations

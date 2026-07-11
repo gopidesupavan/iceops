@@ -1,8 +1,19 @@
-"""Wasted-storage cost estimate for a table.
+"""Wasted-storage cost estimate for a table (read-only).
 
-- live: data referenced by the current snapshot
-- stale: data only reachable through older snapshots (freed by expiring them)
-- orphan: data in the table location referenced by nothing (freed by clean-orphans)
+Every byte gets one of three buckets:
+- live:   referenced by the current snapshot — this IS your table
+- stale:  only reachable through older snapshots — freed by expire (+ clean-orphans)
+- orphan: referenced by nothing — freed by clean-orphans
+
+THE FLOW
+    1. `collect(table)` reuses the doctor pipeline's metrics
+    2. stale = reachable(all snapshots) − (current data + current delete files),
+       clamped ≥ 0. This is an UPPER BOUND: it assumes expiring every old snapshot.
+    3. orphan estimate comes from the collector (local warehouses only in v0.1;
+       object stores report "unavailable" as an explicit note — never a silent zero)
+    4. monthly waste = (stale + orphan) / 1024³ × --dollars-per-gb-month
+       (default 0.023, S3 Standard). Unknowable buckets are excluded and noted,
+       so the total is a floor, never an exaggeration.
 """
 
 from __future__ import annotations

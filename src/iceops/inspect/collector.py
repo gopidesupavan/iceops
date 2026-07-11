@@ -1,8 +1,22 @@
 """Turn PyIceberg table metadata into a TableMetrics snapshot.
 
-Everything here is read-only and defensive: inspect endpoints vary across PyIceberg
-versions and catalog types, so each section degrades to "unknown" instead of failing the
-whole diagnosis.
+Every number iceops shows comes from here, and (with one exception) all of it is read
+from Iceberg METADATA — the writer recorded each file's size, row count, and column
+stats in the manifests at commit time, so we never open a single parquet file.
+
+THE FLOW — five independent sections, one inspect endpoint each:
+    _collect_files       inspect.files()        → sizes, histogram, small-file ratio,
+                                                   delete-file counts (current snapshot)
+    _collect_snapshots   metadata.snapshots     → counts, ages, commit cadence, summary
+    _collect_manifests   inspect.manifests()    → manifest count + byte sizes
+    _collect_partitions  inspect.partitions()   → file-count skew across partitions
+    _collect_storage     inspect.all_files()    → reachable bytes across ALL snapshots;
+                         + Path.stat() walk     → the ONE non-metadata read: a local-
+                                                   filesystem orphan estimate (object
+                                                   stores → None, reported as unknown)
+
+Everything is defensive: inspect endpoints vary across PyIceberg versions and catalog
+types, so each section degrades to "unknown" instead of failing the whole diagnosis.
 """
 
 from __future__ import annotations

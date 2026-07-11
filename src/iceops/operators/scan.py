@@ -1,4 +1,11 @@
-"""Fleet-wide health scan."""
+"""Fleet-wide health scan (read-only).
+
+THE FLOW
+    1. walk every namespace in the catalog, glob-match table names against --pattern
+    2. run `doctor` on each table; a per-table failure becomes a TableError entry
+       instead of aborting the fleet (one broken table must not hide the other 500)
+    3. assemble FleetReport with per-status counts
+"""
 
 from __future__ import annotations
 

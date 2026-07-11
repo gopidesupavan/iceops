@@ -1,14 +1,40 @@
 """Orphan-file cleanup — THE ONLY code in iceops that deletes physical files.
 
-An orphan is a file inside the table location that no snapshot, manifest, metadata-log
-entry, or statistics file references: failed-write debris plus everything expire and
-rewrite-manifests deliberately unreference. Deleting it is invisible to Iceberg (reads
-are purely metadata-driven) — the only effect is a smaller storage bill.
+WHY THIS EXISTS
+    An orphan is a file inside the table location that NOTHING references: failed-write
+    debris, plus everything expire and rewrite-manifests deliberately unreference.
+    Iceberg reads are purely metadata-driven, so orphans are invisible to every query —
+    their only effect is a storage bill. Deleting them is pure garbage collection.
 
-Safety design (design/plan-v0.2-orphans.md): reachable set from PyIceberg metadata only;
-a funnel that only ever narrows (scope lock, metadata.json hard-protection, age
-threshold, exclude globs); batched deletion that re-checks table metadata before every
-batch and re-filters if any commit happened; worst failure mode is deleting too little.
+HOW IT WORKS — THE FLOW
+
+    plan (read-only, `_build_plan`):
+      1. `_reachable(table)`: every path Iceberg metadata knows about, from SIX sources —
+         all data/delete files (all snapshots) + all manifests + every manifest list +
+         every metadata-log entry + current metadata.json + statistics files.
+         Missing a source here would delete live data; the list is review-mandatory.
+      2. `_listing(table)`: what is ACTUALLY on storage — recursive listing through
+         PyIceberg's own filesystem (same credentials as the catalog), with size + mtime
+      3. `normalize_path` both sides (safety-critical: 'file:///x' == '/x',
+         's3://b/k' == 'b/k') so set membership can't miss on representation
+      4. `filter_candidates` — THE FUNNEL, each stage only narrows:
+         listed  →  not reachable  →  inside table location  →  not *.metadata.json /
+         version-hint.text (NEVER deleted, regardless of anything)  →  older than
+         --older-than (default 3d; unknown mtime = young = untouchable)  →  not --exclude
+      5. the plan records `metadata_location_at_plan` — the exact table version the
+         decision was based on
+
+    execute (`execute_plan`), in batches of --batch-size:
+      6. before EVERY batch: refresh the table; if metadata moved past the version the
+         plan saw (ANY commit — even one between plan and execute), recompute the
+         reachable set and spare anything newly referenced. This exact gap was a real
+         bug caught by the concurrency race test before shipping.
+      7. delete via `table.io.delete` (native IO); already-gone files are tolerated;
+         a literal log of every deleted path is kept
+      8. worst failure mode by construction: deleting too LITTLE. A crash mid-run just
+         leaves fewer orphans; re-running resumes safely.
+
+Safety rationale and decoy-test requirements: design/plan-v0.2-orphans.md.
 """
 
 from __future__ import annotations

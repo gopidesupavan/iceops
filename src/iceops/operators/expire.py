@@ -1,14 +1,37 @@
 """Snapshot expiration — the first fix operator.
 
-Execution is 100% native PyIceberg (`expire_snapshots().by_ids().commit()`, atomic, with
-ref protection enforced upstream a second time). iceops owns only candidate selection,
-the unreferenced-bytes accounting, and the guards. PyIceberg 0.11.x expiration is
-metadata-only: it deletes NO physical files (verified from source; pinned by test). We
-report what becomes unreferenced and point at clean-orphans for reclamation.
+WHY THIS EXISTS
+    Every write creates a snapshot (a "save point"); Iceberg never discards them on its
+    own. Old snapshots bloat metadata and keep replaced files alive on storage. Expire
+    forgets chosen old versions. Your current data is untouched; what you lose is time
+    travel to the expired versions only.
 
-Algorithm provenance: reachable-set difference (Java's ReachableFileCleanup /
-Spark's anti-join), never the incremental manifest-status walk — see
-design/plan-v0.2-expire.md.
+HOW IT WORKS — THE FLOW
+
+    plan (read-only, `_build_plan`):
+      1. list snapshots from table metadata; collect protected ids (branch/tag heads,
+         which includes the current snapshot via the `main` branch ref)
+      2. `select_candidates` (pure function): a snapshot is expired only if ALL hold —
+         not protected, NOT among the newest --retain-last, AND older than --older-than
+         (conservative intersection: both knobs must agree)
+      3. unreferenced-bytes accounting (`_unreferenced_bytes`): reachable-set difference —
+         union of files across ALL snapshots minus union across SURVIVORS. Same algorithm
+         family as Java's ReachableFileCleanup / Spark's anti-join; we deliberately avoid
+         Java's faster incremental walk (correctness edges with branches/tags)
+      4. warn if the commit cadence looks like a streaming writer (lagging incremental
+         readers WILL break when their snapshot vanishes)
+
+    execute (`_execute`):
+      5. hand the EXACT planned ids to native PyIceberg:
+         `table.maintenance.expire_snapshots().by_ids(ids).commit()` — what the user
+         reviewed is what happens; PyIceberg re-checks ref protection a second time
+      6. on commit conflict: refresh, retry once, then fail loudly
+      7. IMPORTANT: PyIceberg 0.11.x expiration is metadata-only — it deletes NO physical
+         files (verified from source; pinned by a test that fails if an upgrade changes
+         this). Freed storage comes later, from clean-orphans. We therefore report bytes
+         as "become unreferenced", never "freed".
+
+See design/plan-v0.2-expire.md for the full rationale.
 """
 
 from __future__ import annotations
