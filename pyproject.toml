@@ -59,6 +59,8 @@ packages = ["src/iceops"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# detailed execution view by default: one line per test, slowest tests, skip/fail reasons
+addopts = "-v -ra --durations=10"
 
 [tool.ruff]
 line-length = 100

@@ -30,7 +30,15 @@ ICEOPS_BIN = shutil.which("iceops")
 def iceops(*args: str, cwd: Path) -> subprocess.CompletedProcess:
     command = [ICEOPS_BIN, *args] if ICEOPS_BIN else [sys.executable, "-m", "iceops.cli.app", *args]
     env = {k: v for k, v in os.environ.items() if k != "ICEOPS_CONFIG"}
-    return subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+    # execution log: pytest shows this on failure (or live with -s) — exactly what a
+    # user would have seen in their terminal
+    print(f"\n$ iceops {' '.join(args)}   [exit {result.returncode}]")
+    if result.stdout.strip():
+        print(result.stdout.rstrip())
+    if result.stderr.strip():
+        print(f"[stderr] {result.stderr.rstrip()}")
+    return result
 
 
 def make_workspace(tmp_path_factory, name: str) -> tuple[Path, object]:
