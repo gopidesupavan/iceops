@@ -21,6 +21,9 @@ import pyarrow as pa
 import pytest
 from pyiceberg.catalog import load_catalog
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "examples"))
+from table_factory import VARIATIONS, build_all  # noqa: E402
+
 ICEOPS_BIN = shutil.which("iceops")
 
 
@@ -177,6 +180,90 @@ class TestMaintenanceJourney:
             result = iceops(*args, cwd=workspace)
             assert result.returncode == 0, f"{args[0]} did not converge: {result.stdout}"
             assert "nothing" in result.stdout.lower()
+
+
+@pytest.fixture(scope="module")
+def shapes_workspace(tmp_path_factory):
+    """Every partition variation from the compatibility lab, in a real CLI workspace."""
+    workspace, catalog = make_workspace(tmp_path_factory, "shapes")
+    results = build_all(catalog, "lab")
+    return workspace, results
+
+
+SHAPE_NAMES = [v.name for v in VARIATIONS]
+
+
+class TestPartitionedShapesJourney:
+    """The full CLI pipeline over every table shape: identity/day/month/bucket/truncate
+    partitions, spec evolution, schema evolution, overwrite. What the integration matrix
+    proves in-process, this proves through the real binary."""
+
+    def _catalog(self, workspace: Path):
+        warehouse = workspace / "warehouse"
+        return load_catalog(
+            "e2e",
+            type="sql",
+            uri=f"sqlite:///{warehouse}/catalog.db",
+            warehouse=f"file://{warehouse}",
+        )
+
+    def test_scan_sees_every_shape(self, shapes_workspace):
+        workspace, results = shapes_workspace
+        result = iceops("scan", "--catalog", "e2e", "--pattern", "lab.*", cwd=workspace)
+        assert result.returncode in (0, 1), result.stderr
+        for identifier, status in results.items():
+            if status == "ok":
+                assert identifier.split(".")[1][:12] in result.stdout.replace("\n", "")
+
+    @pytest.mark.parametrize("name", SHAPE_NAMES)
+    def test_full_pipeline_preserves_every_shape(self, shapes_workspace, name):
+        workspace, results = shapes_workspace
+        identifier = f"lab.{name}"
+        if results[identifier] != "ok":
+            pytest.skip(f"shape not buildable here: {results[identifier]}")
+
+        catalog = self._catalog(workspace)
+        table = catalog.load_table(identifier)
+        rows_before = table.scan().to_arrow().num_rows
+        specs_before = len(table.metadata.partition_specs)
+
+        for args in (
+            (
+                "expire",
+                identifier,
+                "--catalog",
+                "e2e",
+                "--retain-last",
+                "1",
+                "--older-than",
+                "0s",
+                "--yes",
+            ),
+            ("rewrite-manifests", identifier, "--catalog", "e2e", "--yes"),
+            ("clean-orphans", identifier, "--catalog", "e2e", "--older-than", "0s", "--yes"),
+        ):
+            result = iceops(*args, cwd=workspace)
+            assert result.returncode == 0, f"{name}/{args[0]}: {result.stdout}{result.stderr}"
+
+        table = self._catalog(workspace).load_table(identifier)
+        assert table.scan().to_arrow().num_rows == rows_before, f"{name} lost rows"
+        assert len(table.metadata.partition_specs) == specs_before, f"{name} lost a spec"
+
+        doctor_report = json.loads(
+            iceops("doctor", identifier, "--catalog", "e2e", "--json", cwd=workspace).stdout
+        )
+        check_ids = {f["check_id"] for f in doctor_report["findings"]}
+        assert "orphan-files" not in check_ids, f"{name}: orphans left behind"
+
+    def test_partition_pruning_survives_the_pipeline(self, shapes_workspace):
+        """After maintenance through the real CLI, partition filters must still work."""
+        workspace, results = shapes_workspace
+        if results["lab.part_identity"] != "ok":
+            pytest.skip("identity shape not buildable")
+        table = self._catalog(workspace).load_table("lab.part_identity")
+        alpha_rows = table.scan(row_filter="category = 'alpha'").to_arrow().num_rows
+        total_rows = table.scan().to_arrow().num_rows
+        assert 0 < alpha_rows < total_rows  # the filter genuinely prunes
 
 
 @pytest.fixture(scope="module")
