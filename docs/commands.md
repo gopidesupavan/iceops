@@ -137,11 +137,20 @@ engine dry-run is an estimate: Spark/Trino choose the exact rewrite files intern
 DRY RUN — nothing changed. Add --yes to execute.
 ```
 
-`compact` is engine-backed in this slice. iceops plans and submits one engine action;
-Spark executes Iceberg `rewrite_data_files`, and Trino support uses `ALTER TABLE …
-EXECUTE optimize`. Native Arrow compaction remains not-yet-implemented.
+`compact` is engine-backed in this slice, and `--engine` is **required** (native Arrow
+compaction is not yet available). iceops plans and submits one engine action; Spark runs
+Iceberg `rewrite_data_files`, Trino runs `ALTER TABLE … EXECUTE optimize`. Because
+compaction rewrites data, iceops verifies the engine preserved every row (via snapshot
+`total-records`) and refuses the result otherwise — the pre-compaction snapshot stays
+intact for rollback.
 
-Options: `--engine spark|trino|native`, `--engine-catalog <name>`,
+Both engines are verified against the real thing (no mocks): Spark via a local JVM, Trino
+via a REST catalog + MinIO + Trino container stack. Run the gated labs with
+`ICEOPS_RUN_SPARK=1` / `ICEOPS_RUN_TRINO=1`, or by hand: `examples/spark_lab.py` and
+`examples/trino_lab.py` (the latter needs
+`docker compose -f tests/integration/trino_stack/docker-compose.yml up -d`).
+
+Options: `--engine spark|trino` (required), `--engine-catalog <name>`,
 `--target-file-size 512MB`, `--yes`, `--force`, `--json`.
 
 Compaction rewrites data into a new snapshot but does not reclaim old physical files by

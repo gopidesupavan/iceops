@@ -54,3 +54,31 @@ jobs:
 
       - name: End-to-end journeys
         run: uv run pytest tests/e2e
+
+  engines:
+    name: engine labs (real Spark + Trino)
+    runs-on: ubuntu-latest
+    # kept off the core matrix: pulls JVMs/containers, slower and heavier — a hiccup here
+    # must never red the core build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (with engine extras)
+        run: uv sync --all-groups --extra spark --extra trino
+
+      - name: Spark compaction lab (local JVM)
+        run: ICEOPS_RUN_SPARK=1 uv run pytest tests/integration/test_spark_compact_lab.py
+
+      - name: Trino compaction lab (REST catalog + MinIO + Trino containers)
+        run: ICEOPS_RUN_TRINO=1 uv run pytest tests/integration/test_trino_compact_lab.py
