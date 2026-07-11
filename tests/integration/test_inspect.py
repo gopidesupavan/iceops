@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from conftest import MESSY_APPENDS
-
 from iceops.inspect import collect
+
+MESSY_APPENDS = 25  # must match tests/conftest.py seeding (pinned by the assertions below)
 
 
 def test_collect_messy_table(seeded_catalog):

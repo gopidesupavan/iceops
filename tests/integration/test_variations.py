@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from pyiceberg.catalog import load_catalog
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "examples"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "examples"))
 from table_factory import VARIATIONS, build_all  # noqa: E402
 
 from iceops.inspect import collect  # noqa: E402

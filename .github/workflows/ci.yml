@@ -32,5 +32,8 @@ jobs:
       - name: Type check
         run: uv run mypy
 
-      - name: Tests
-        run: uv run pytest -q
+      - name: Unit tests
+        run: uv run pytest tests/unit -q
+
+      - name: Integration tests
+        run: uv run pytest tests/integration -q

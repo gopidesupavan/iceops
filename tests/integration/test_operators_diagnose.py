@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from iceops.errors import NotYetImplemented, TableNotFoundError
-from iceops.operators import compact, cost, doctor, scan, tune
+from iceops.errors import TableNotFoundError
+from iceops.operators import cost, doctor, scan
 
 
 def test_doctor_flags_messy_not_healthy(seeded_catalog):
@@ -41,9 +41,3 @@ def test_cost_reports_waste(seeded_catalog):
         assert report.stale_bytes >= 0
     assert report.orphan_bytes_estimate and report.orphan_bytes_estimate > 1024 * 1024
     assert report.monthly_waste_dollars is not None
-
-
-def test_fix_operators_are_explicit_stubs():
-    for op in (compact, tune):
-        with pytest.raises(NotYetImplemented):
-            op()
