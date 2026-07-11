@@ -10,6 +10,8 @@ from rich.text import Text
 
 from ..models import (
     CostReport,
+    ExpirePlan,
+    ExpireResult,
     Finding,
     FleetReport,
     HealthReport,
@@ -151,6 +153,46 @@ def render_cost(report: CostReport) -> None:
         )
     for note in report.notes:
         console.print(f"[dim]note: {note}[/dim]")
+
+
+def render_expire_plan(plan: ExpirePlan, executed: ExpireResult | None = None) -> None:
+    if not plan.candidates:
+        console.print(
+            f"{plan.identifier}: nothing to expire "
+            f"({plan.snapshot_count} snapshots, retain-last {plan.retain_last}, "
+            f"cutoff {plan.cutoff:%Y-%m-%d %H:%M} UTC)"
+        )
+        return
+
+    first = plan.candidates[0].committed_at
+    last = plan.candidates[-1].committed_at
+    console.print(
+        f"plan: expire {len(plan.candidates)} of {plan.snapshot_count} snapshots "
+        f"({first:%Y-%m-%d %H:%M} … {last:%Y-%m-%d %H:%M} UTC)"
+    )
+    for candidate in plan.candidates:
+        console.print(
+            f"  snapshot {candidate.snapshot_id}  "
+            f"{candidate.committed_at:%Y-%m-%d %H:%M:%S}  {candidate.operation or '?'}"
+        )
+    console.print(
+        f"after expiry: {human_bytes(plan.unreferenced_manifest_bytes)} of manifests + "
+        f"{human_bytes(plan.unreferenced_data_bytes)} of data files become unreferenced"
+    )
+    console.print(
+        f"[dim]expiration removes metadata only — reclaim unreferenced files with: "
+        f"iceops clean-orphans {plan.identifier}[/dim]"
+    )
+    for warning in plan.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if executed is None:
+        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+    else:
+        console.print(
+            f"[green]expired {len(executed.expired_snapshot_ids)} snapshots — "
+            f"{executed.snapshot_count_after} remain[/green]"
+        )
 
 
 def render_catalogs(profiles: dict[str, dict[str, Any]]) -> None:

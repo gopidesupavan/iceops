@@ -53,6 +53,45 @@ def test_stub_commands_exit_nonzero(seeded_catalog):
     assert result.exit_code == 2
 
 
+def test_expire_cli_dry_run_then_execute(seeded_catalog):
+    import pyarrow as pa
+
+    name = "db.expirecli"
+    try:
+        seeded_catalog.drop_table(name)
+    except Exception:
+        pass
+    batch = pa.table({"id": pa.array(range(5), type=pa.int64())})
+    table = seeded_catalog.create_table(name, schema=batch.schema)
+    for _ in range(4):
+        table.append(batch)
+
+    dry = runner.invoke(
+        app, ["expire", name, "--catalog", "test", "--retain-last", "2", "--older-than", "0s"]
+    )
+    assert dry.exit_code == 1  # work planned, nothing done
+    assert "DRY RUN" in dry.stdout
+    assert "snapshot " in dry.stdout  # literal listing
+
+    run = runner.invoke(
+        app,
+        ["expire", name, "--catalog", "test", "--retain-last", "2", "--older-than", "0s", "--yes"],
+    )
+    assert run.exit_code == 0
+    assert "expired 2 snapshots" in run.stdout
+
+    again = runner.invoke(
+        app, ["expire", name, "--catalog", "test", "--retain-last", "2", "--older-than", "0s"]
+    )
+    assert again.exit_code == 0  # nothing left to do
+    assert "nothing to expire" in again.stdout
+
+
+def test_expire_cli_bad_duration(seeded_catalog):
+    result = runner.invoke(app, ["expire", "db.messy", "--catalog", "test", "--older-than", "7x"])
+    assert result.exit_code == 2
+
+
 def test_version():
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0

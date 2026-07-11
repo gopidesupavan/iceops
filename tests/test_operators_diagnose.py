@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from iceops.errors import NotYetImplemented, TableNotFoundError
-from iceops.operators import clean_orphans, compact, cost, doctor, expire, scan, tune
+from iceops.operators import clean_orphans, compact, cost, doctor, scan, tune
 
 
 def test_doctor_flags_messy_not_healthy(seeded_catalog):
@@ -23,7 +23,8 @@ def test_doctor_missing_table(seeded_catalog):
 def test_scan_covers_all_tables(seeded_catalog):
     report = scan(seeded_catalog, "test")
     identifiers = {r.identifier for r in report.reports}
-    assert identifiers == {"db.messy", "db.healthy"}
+    # other test modules may add tables to the session catalog; scan must see at least these
+    assert identifiers >= {"db.messy", "db.healthy"}
     assert not report.errors
     assert set(report.status_counts) >= {"healthy"}
 
@@ -43,6 +44,6 @@ def test_cost_reports_waste(seeded_catalog):
 
 
 def test_fix_operators_are_explicit_stubs():
-    for op in (compact, expire, clean_orphans, tune):
+    for op in (compact, clean_orphans, tune):
         with pytest.raises(NotYetImplemented):
             op()

@@ -13,7 +13,7 @@ from .. import __version__, operators
 from ..catalog import connect
 from ..config import default_catalog_name, load_profiles
 from ..errors import IceopsError, NotYetImplemented
-from ..models import Severity
+from ..models import ExpireResult, Severity, parse_duration
 from . import render
 
 EXIT_OK = 0
@@ -133,6 +133,54 @@ def cost(
 
 
 @app.command()
+def expire(
+    table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
+    catalog: Optional[str] = CatalogOpt,
+    retain_last: int = typer.Option(10, "--retain-last", help="always keep the newest N snapshots"),
+    older_than: str = typer.Option(
+        "7d", "--older-than", help="only expire snapshots older than this (e.g. 12h, 7d, 2w)"
+    ),
+    yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
+    force: bool = typer.Option(
+        False, "--force", help="proceed even if another optimizer manages the table"
+    ),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Expire old snapshots (metadata only; dry-run by default).
+
+    A snapshot is expired only if it is BOTH beyond --retain-last AND older than
+    --older-than. Branch/tag heads and the current snapshot are never expired.
+    """
+    name, identifier = _resolve(table, catalog)
+    try:
+        cutoff = parse_duration(older_than)
+    except ValueError as exc:
+        raise _fail(str(exc))
+    try:
+        outcome = operators.expire(
+            connect(name),
+            identifier,
+            retain_last=retain_last,
+            older_than=cutoff,
+            execute=yes,
+            force=force,
+        )
+    except IceopsError as exc:
+        raise _fail(str(exc))
+
+    plan = outcome.plan if isinstance(outcome, ExpireResult) else outcome
+    result = outcome if isinstance(outcome, ExpireResult) else None
+    if json_output:
+        print(outcome.model_dump_json(indent=2))
+    else:
+        render.render_expire_plan(
+            plan, executed=result if result and result.expired_snapshot_ids else None
+        )
+    if not yes and plan.candidates:
+        raise typer.Exit(EXIT_FINDINGS)  # work is planned but nothing was done
+
+
+@app.command()
 def catalogs() -> None:
     """List configured catalog profiles."""
     render.render_catalogs(load_profiles())
@@ -159,7 +207,6 @@ def _stub_command(op_name: str, fn: object) -> None:
 
 for _name, _fn in (
     ("compact", operators.compact),
-    ("expire", operators.expire),
     ("clean-orphans", operators.clean_orphans),
     ("rewrite-manifests", operators.rewrite_manifests),
     ("tune", operators.tune),

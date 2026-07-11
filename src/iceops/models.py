@@ -6,6 +6,7 @@ Operators return these models and never print; renderers decide presentation.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from enum import Enum
 from typing import Any, Optional
 
@@ -131,6 +132,32 @@ class CostReport(BaseModel):
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
 
+class ExpireCandidate(BaseModel):
+    snapshot_id: int
+    committed_at: dt.datetime
+    operation: Optional[str] = None
+
+
+class ExpirePlan(BaseModel):
+    identifier: str
+    retain_last: int
+    cutoff: dt.datetime
+    candidates: list[ExpireCandidate] = Field(default_factory=list)
+    snapshot_count: int = 0
+    protected_ids: list[int] = Field(default_factory=list)
+    unreferenced_data_bytes: Optional[int] = None
+    unreferenced_manifest_bytes: Optional[int] = None
+    warnings: list[str] = Field(default_factory=list)
+    generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+class ExpireResult(BaseModel):
+    plan: ExpirePlan
+    expired_snapshot_ids: list[int] = Field(default_factory=list)
+    snapshot_count_after: int = 0
+    status: str = "expired"  # expired | nothing-to-do
+
+
 class Action(BaseModel):
     op: str
     table: str
@@ -148,6 +175,19 @@ class ActionResult(BaseModel):
     action: Action
     status: str
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+_DURATION_RE = re.compile(r"^(\d+)\s*([smhdw])$")
+_DURATION_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+
+def parse_duration(text: str) -> dt.timedelta:
+    """Parse '30s', '12h', '7d', '2w' style durations (shared by expire and policy)."""
+    match = _DURATION_RE.match(text.strip().lower())
+    if not match:
+        raise ValueError(f"invalid duration '{text}' (expected <number><unit>, units: s m h d w)")
+    value, unit = match.groups()
+    return dt.timedelta(seconds=int(value) * _DURATION_SECONDS[unit])
 
 
 def human_bytes(n: Optional[int]) -> str:
