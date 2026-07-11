@@ -15,9 +15,7 @@ def metrics(**overrides) -> TableMetrics:
 def test_small_files_warn_and_critical():
     assert small_files.run(metrics(data_file_count=10, small_file_ratio=0.9)) is None
 
-    warn = small_files.run(
-        metrics(data_file_count=50, small_file_count=20, small_file_ratio=0.4)
-    )
+    warn = small_files.run(metrics(data_file_count=50, small_file_count=20, small_file_ratio=0.4))
     assert warn is not None and warn.severity == Severity.WARN
 
     critical = small_files.run(

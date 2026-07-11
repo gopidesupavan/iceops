@@ -110,9 +110,7 @@ def _collect_manifests(table: "Table", metrics: TableMetrics) -> None:
         manifests = table.inspect.manifests()
     except Exception:
         return
-    lengths = (
-        manifests.column("length").to_pylist() if "length" in manifests.column_names else []
-    )
+    lengths = manifests.column("length").to_pylist() if "length" in manifests.column_names else []
     metrics.manifest_count = manifests.num_rows
     if lengths:
         metrics.avg_manifest_bytes = int(sum(lengths) / len(lengths))
@@ -148,9 +146,11 @@ def _collect_storage(table: "Table", metrics: TableMetrics) -> None:
             f.stat().st_size for f in local_root.rglob("*") if f.is_file()
         )
         if metrics.reachable_bytes is not None:
-            metadata_bytes = sum(
-                f.stat().st_size for f in (local_root / "metadata").rglob("*") if f.is_file()
-            ) if (local_root / "metadata").is_dir() else 0
+            metadata_bytes = (
+                sum(f.stat().st_size for f in (local_root / "metadata").rglob("*") if f.is_file())
+                if (local_root / "metadata").is_dir()
+                else 0
+            )
             estimate = metrics.filesystem_bytes - metadata_bytes - metrics.reachable_bytes
             metrics.orphan_bytes_estimate = max(estimate, 0)
 
