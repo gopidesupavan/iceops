@@ -13,7 +13,14 @@ from .. import __version__, operators
 from ..catalog import connect
 from ..config import default_catalog_name, load_profiles
 from ..errors import IceopsError, NotYetImplemented
-from ..models import ExpireResult, RewriteManifestsResult, Severity, parse_duration, parse_size
+from ..models import (
+    CleanOrphansResult,
+    ExpireResult,
+    RewriteManifestsResult,
+    Severity,
+    parse_duration,
+    parse_size,
+)
 from . import render
 
 EXIT_OK = 0
@@ -226,6 +233,59 @@ def rewrite_manifests_cmd(
         raise typer.Exit(EXIT_FINDINGS)  # work is planned but nothing was done
 
 
+@app.command(name="clean-orphans")
+def clean_orphans_cmd(
+    table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
+    catalog: Optional[str] = CatalogOpt,
+    older_than: str = typer.Option(
+        "3d", "--older-than", help="never delete files younger than this (safety margin)"
+    ),
+    exclude: list[str] = typer.Option(
+        [], "--exclude", help="filename glob to protect (repeatable), e.g. '_SUCCESS'"
+    ),
+    batch_size: int = typer.Option(100, "--batch-size", help="deletes per re-check batch"),
+    yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
+    force: bool = typer.Option(
+        False, "--force", help="proceed even if another optimizer manages the table"
+    ),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Delete files no snapshot references (dry-run by default).
+
+    The only iceops command that deletes physical files. Orphans come from failed
+    writes and from expire/rewrite-manifests unreferencing old versions.
+    *.metadata.json files are never deleted.
+    """
+    name, identifier = _resolve(table, catalog)
+    try:
+        cutoff = parse_duration(older_than)
+    except ValueError as exc:
+        raise _fail(str(exc))
+    try:
+        outcome = operators.clean_orphans(
+            connect(name),
+            identifier,
+            older_than=cutoff,
+            exclude=tuple(exclude),
+            batch_size=batch_size,
+            execute=yes,
+            force=force,
+        )
+    except IceopsError as exc:
+        raise _fail(str(exc))
+
+    plan = outcome.plan if isinstance(outcome, CleanOrphansResult) else outcome
+    result = outcome if isinstance(outcome, CleanOrphansResult) else None
+    if json_output:
+        print(outcome.model_dump_json(indent=2))
+    else:
+        render.render_clean_orphans_plan(
+            plan, executed=result if result and result.status == "cleaned" else None
+        )
+    if not yes and plan.actionable:
+        raise typer.Exit(EXIT_FINDINGS)  # work is planned but nothing was done
+
+
 @app.command()
 def catalogs() -> None:
     """List configured catalog profiles."""
@@ -253,7 +313,6 @@ def _stub_command(op_name: str, fn: object) -> None:
 
 for _name, _fn in (
     ("compact", operators.compact),
-    ("clean-orphans", operators.clean_orphans),
     ("tune", operators.tune),
 ):
     _stub_command(_name, _fn)

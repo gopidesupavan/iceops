@@ -51,6 +51,7 @@ Tables keep getting written to, so this is a cycle, not a pipeline — the same
 | `iceops cost <table>` | Estimated wasted storage $ from unexpired snapshots and orphaned files |
 | `iceops expire <table>` | Expire old snapshots — dry-run by default, `--yes` to execute |
 | `iceops rewrite-manifests <table>` | Consolidate fragmented manifests (metadata only) — dry-run by default |
+| `iceops clean-orphans <table>` | Delete files no snapshot references — dry-run by default, age-guarded |
 | `iceops catalogs` | List configured catalog profiles |
 
 Every command supports `--json` for machine consumption, and exit codes are CI-friendly
@@ -61,9 +62,16 @@ Every command supports `--json` for machine consumption, and exit codes are CI-f
 which snapshots go and how many bytes become unreferenced. A snapshot is only expired if
 it is BOTH beyond `--retain-last` AND older than `--older-than`.
 
-Remaining fix operators (`clean-orphans`, `compact`, `tune`) land next, dry-run by
-default; declarative policy (`iceops.yaml` + `iceops apply`) in v0.3; a stateless HTTP
-API (`iceops serve`) in v0.4.
+`clean-orphans` is the only iceops command that deletes physical files, and it is built
+paranoid: it deletes only files referenced by no snapshot (failed-write debris and what
+`expire`/`rewrite-manifests` unreference), never touches `*.metadata.json`, never touches
+files younger than `--older-than` (default 3d — an in-flight write can look orphaned),
+supports `--exclude` globs, and re-verifies table metadata before every delete batch in
+case a writer committed mid-run.
+
+Remaining fix operators (`compact`, `tune`) land next, dry-run by default; declarative
+policy (`iceops.yaml` + `iceops apply`) in v0.3; a stateless HTTP API (`iceops serve`)
+in v0.4.
 
 ## Quickstart with a local demo lakehouse
 

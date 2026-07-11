@@ -9,6 +9,8 @@ from rich.table import Table as RichTable
 from rich.text import Text
 
 from ..models import (
+    CleanOrphansPlan,
+    CleanOrphansResult,
     CostReport,
     ExpirePlan,
     ExpireResult,
@@ -226,6 +228,60 @@ def render_rewrite_manifests_plan(
             f"[green]rewrote manifests: {executed.manifests_before} → "
             f"{executed.manifests_after} (snapshot {executed.new_snapshot_id})[/green]"
         )
+
+
+def render_clean_orphans_plan(
+    plan: CleanOrphansPlan, executed: CleanOrphansResult | None = None
+) -> None:
+    skipped_note = "  ".join(f"{k}: {v}" for k, v in plan.skipped.items()) if plan.skipped else ""
+    if not plan.actionable:
+        console.print(
+            f"{plan.identifier}: nothing to clean — {plan.listed_count} files listed, "
+            f"{plan.reachable_count} reachable, 0 deletable orphans"
+            + (f" (skipped — {skipped_note})" if skipped_note else "")
+        )
+        return
+
+    console.print(
+        f"plan: delete {len(plan.candidates)} orphaned files "
+        f"({human_bytes(plan.total_bytes)}) under {plan.location}"
+    )
+    now = _utcnow()
+    for f in plan.candidates:
+        rel = f.path.split(plan.location.rstrip("/") + "/")[-1] if plan.location else f.path
+        age = f"{(now - f.modified_at).days}d" if f.modified_at else "?"
+        console.print(f"  {rel}  ({human_bytes(f.size_bytes)}, {age} old)")
+    console.print(
+        f"listed {plan.listed_count} files · {plan.reachable_count} reachable"
+        + (f" · skipped — {skipped_note}" if skipped_note else "")
+    )
+    console.print(
+        "[dim]*.metadata.json files are never deleted; files younger than "
+        f"{plan.older_than_days:g}d are never deleted[/dim]"
+    )
+    for warning in plan.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if executed is None:
+        console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+    else:
+        console.print(
+            f"[green]deleted {len(executed.deleted)} files, freed "
+            f"{human_bytes(executed.freed_bytes)}[/green]"
+        )
+        if executed.spared:
+            console.print(
+                f"[yellow]spared {len(executed.spared)} files that became referenced "
+                f"during the run (a writer committed)[/yellow]"
+            )
+        if executed.missing:
+            console.print(f"[dim]{len(executed.missing)} were already gone[/dim]")
+
+
+def _utcnow():
+    import datetime as _dt
+
+    return _dt.datetime.now(_dt.timezone.utc)
 
 
 def render_catalogs(profiles: dict[str, dict[str, Any]]) -> None:

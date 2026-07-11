@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from iceops.errors import NotYetImplemented, TableNotFoundError
-from iceops.operators import clean_orphans, compact, cost, doctor, scan, tune
+from iceops.operators import compact, cost, doctor, scan, tune
 
 
 def test_doctor_flags_messy_not_healthy(seeded_catalog):
@@ -44,6 +44,6 @@ def test_cost_reports_waste(seeded_catalog):
 
 
 def test_fix_operators_are_explicit_stubs():
-    for op in (compact, clean_orphans, tune):
+    for op in (compact, tune):
         with pytest.raises(NotYetImplemented):
             op()

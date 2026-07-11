@@ -20,7 +20,8 @@ def test_scan_json(seeded_catalog):
     result = runner.invoke(app, ["scan", "--catalog", "test", "--json"])
     payload = json.loads(result.stdout)
     assert payload["catalog"] == "test"
-    assert {r["identifier"] for r in payload["reports"]} == {"db.messy", "db.healthy"}
+    # other test modules may add tables to the session catalog; scan must see at least these
+    assert {r["identifier"] for r in payload["reports"]} >= {"db.messy", "db.healthy"}
     assert result.exit_code == 1  # messy table has findings
 
 
@@ -119,6 +120,47 @@ def test_rewrite_manifests_cli_bad_size(seeded_catalog):
         app, ["rewrite-manifests", "db.messy", "--catalog", "test", "--target-manifest-size", "8xb"]
     )
     assert result.exit_code == 2
+
+
+def test_clean_orphans_cli_flow(seeded_catalog, tmp_path):
+    import datetime as dt
+    import os
+    import shutil
+    from pathlib import Path
+    from urllib.parse import urlparse
+
+    import pyarrow as pa
+
+    name = "db.orphcli"
+    try:
+        seeded_catalog.drop_table(name)
+    except Exception:
+        pass
+    batch = pa.table({"id": pa.array(range(10), type=pa.int64())})
+    table = seeded_catalog.create_table(name, schema=batch.schema)
+    table.append(batch)
+    table = seeded_catalog.load_table(name)
+    data_dir = Path(urlparse(table.location()).path) / "data"
+    source = sorted(data_dir.glob("*.parquet"))[0]
+    planted = data_dir / "00000-0-cli-orphan.parquet"
+    shutil.copy(source, planted)
+    old = (dt.datetime.now() - dt.timedelta(days=30)).timestamp()
+    os.utime(planted, (old, old))
+
+    dry = runner.invoke(app, ["clean-orphans", name, "--catalog", "test"])
+    assert dry.exit_code == 1
+    assert "DRY RUN" in dry.stdout
+    assert "cli-orphan" in dry.stdout
+    assert planted.exists()
+
+    run = runner.invoke(app, ["clean-orphans", name, "--catalog", "test", "--yes"])
+    assert run.exit_code == 0
+    assert "deleted 1 files" in run.stdout
+    assert not planted.exists()
+
+    again = runner.invoke(app, ["clean-orphans", name, "--catalog", "test"])
+    assert again.exit_code == 0
+    assert "nothing to clean" in again.stdout
 
 
 def test_expire_cli_bad_duration(seeded_catalog):

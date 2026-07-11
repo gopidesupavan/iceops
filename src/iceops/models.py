@@ -181,6 +181,39 @@ class RewriteManifestsResult(BaseModel):
     status: str = "rewritten"  # rewritten | nothing-to-do
 
 
+class OrphanFile(BaseModel):
+    path: str
+    size_bytes: int = 0
+    modified_at: Optional[dt.datetime] = None
+
+
+class CleanOrphansPlan(BaseModel):
+    identifier: str
+    location: str = ""
+    metadata_location_at_plan: str = ""  # execute re-verifies if the table moved past this
+    candidates: list[OrphanFile] = Field(default_factory=list)
+    total_bytes: int = 0
+    listed_count: int = 0
+    reachable_count: int = 0
+    skipped: dict[str, int] = Field(default_factory=dict)  # young/excluded/metadata-json
+    older_than_days: float = 3.0
+    warnings: list[str] = Field(default_factory=list)
+    generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+    @property
+    def actionable(self) -> bool:
+        return bool(self.candidates)
+
+
+class CleanOrphansResult(BaseModel):
+    plan: CleanOrphansPlan
+    deleted: list[str] = Field(default_factory=list)
+    freed_bytes: int = 0
+    missing: list[str] = Field(default_factory=list)  # already gone when we got there
+    spared: list[str] = Field(default_factory=list)  # re-check found them referenced
+    status: str = "cleaned"  # cleaned | nothing-to-do
+
+
 class Action(BaseModel):
     op: str
     table: str
