@@ -1,3 +1,13 @@
+"""Shared fixtures: a REAL SQLite-backed Iceberg catalog with seeded tables.
+
+House rule — no mocks in integration tests, ever. Hard scenarios are constructed
+physically (real files planted on disk, real commits racing the operator), because a
+mock encodes the author's assumption while reality is what finds the bug (the
+clean-orphans race test proved this pre-ship). tests/unit needs no mocks by
+construction: pure functions over plain data. monkeypatch is acceptable only for
+environment setup (env vars, cwd), never for faking behavior.
+"""
+
 from __future__ import annotations
 
 import shutil
