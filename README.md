@@ -6,6 +6,11 @@
 
 **Doctor, janitor, and autopilot for your Apache Iceberg lakehouse — in one `pip install`.**
 
+> [!WARNING]
+> **Early development — do not use in production yet.** iceops is under active development
+> and has not had a stable release. Commands, flags, and behavior can change without notice.
+> Evaluate it on test/non-critical tables only; back up or snapshot anything you point it at.
+
 No JVM. No Spark cluster. No platform to deploy. Point iceops at any Iceberg catalog and get
 a fleet health report in five minutes.
 
