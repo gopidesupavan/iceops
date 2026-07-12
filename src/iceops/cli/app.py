@@ -25,6 +25,7 @@ from .. import __version__, operators
 from ..catalog import connect
 from ..config import default_catalog_name, load_engine_config, load_profiles
 from ..errors import IceopsError
+from ..operators.cost import DEFAULT_DOLLARS_PER_GB_MONTH
 from ..models import (
     ApplyResult,
     CleanOrphansResult,
@@ -146,7 +147,10 @@ def cost(
     table: str = typer.Argument(..., help="table as 'ns.table' (or 'catalog.ns.table')"),
     catalog: Optional[str] = CatalogOpt,
     dollars_per_gb_month: float = typer.Option(
-        0.023, "--dollars-per-gb-month", help="storage price used for the estimate"
+        DEFAULT_DOLLARS_PER_GB_MONTH,
+        "--dollars-per-gb-month",
+        envvar="ICEOPS_DOLLARS_PER_GB_MONTH",
+        help="storage price per GB-month for the estimate (env: ICEOPS_DOLLARS_PER_GB_MONTH)",
     ),
     json_output: bool = JsonOpt,
 ) -> None:

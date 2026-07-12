@@ -80,8 +80,12 @@ $ iceops cost db.events --catalog demo
 estimated waste: $0.02/month at $0.023/GB-month
 ```
 
-Options: `--dollars-per-gb-month 0.023`. Stale is an upper bound; unknowns are
-reported as notes, never silently zeroed.
+Options: `--dollars-per-gb-month 0.023`. The default (`0.023`) is S3 Standard's first-50TB
+us-east-1 rate — a sane default only. Set your own for the whole environment with the
+`ICEOPS_DOLLARS_PER_GB_MONTH` env var (e.g. `0.021` for higher S3 tiers, your GCS/Azure
+rate, or `0` for self-hosted MinIO); the `--dollars-per-gb-month` flag overrides the env
+var. The rate used is printed in the output, so the assumption is always visible. Stale is
+an upper bound; unknowns are reported as notes, never silently zeroed.
 
 ## iceops expire — drop old snapshots (metadata only)
 

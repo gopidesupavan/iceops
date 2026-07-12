@@ -27,7 +27,10 @@ from ..models import CostReport
 if TYPE_CHECKING:
     from pyiceberg.catalog import Catalog
 
-DEFAULT_DOLLARS_PER_GB_MONTH = 0.023  # S3 standard, us-east-1
+# S3 Standard, first-50TB tier, us-east-1 (2026). A sane default only — real cost
+# varies by region, storage class, and tier. Override with --dollars-per-gb-month
+# or the ICEOPS_DOLLARS_PER_GB_MONTH env var.
+DEFAULT_DOLLARS_PER_GB_MONTH = 0.023
 
 _GB = 1024**3
 
