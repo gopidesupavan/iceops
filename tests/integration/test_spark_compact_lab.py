@@ -171,10 +171,21 @@ def test_spark_backs_expire_rewrite_and_clean_orphans(tmp_path: Path):
         )
         assert er.snapshot_count_after < er.plan.snapshot_count
 
-        # clean-orphans via Spark. Spark hardcodes a 24h minimum for remove_orphan_files
-        # (no SQL override, unlike Trino's configurable min-retention) — iceops surfaces
-        # the engine's own safety, so we pass a realistic window. On a fresh table this
-        # finds no orphans but proves the delegation path runs against real Spark.
+        # clean-orphans via Spark — plant a REAL orphan and prove Spark deletes it.
+        # Spark hardcodes a 24h minimum for remove_orphan_files (no SQL override, unlike
+        # Trino's configurable min-retention), so the orphan is backdated past that window.
+        import os
+        import shutil
+        from urllib.parse import urlparse
+
+        data_dir = Path(urlparse(catalog.load_table("db.t").location()).path) / "data"
+        live = sorted(data_dir.glob("*.parquet"))[0]
+        orphan = data_dir / "00000-0-planted-orphan.parquet"
+        shutil.copy(live, orphan)
+        two_days_ago = (dt.datetime.now() - dt.timedelta(days=2)).timestamp()
+        os.utime(orphan, (two_days_ago, two_days_ago))
+        assert orphan.exists()
+
         cr = clean_orphans(
             catalog,
             "db.t",
@@ -185,8 +196,10 @@ def test_spark_backs_expire_rewrite_and_clean_orphans(tmp_path: Path):
             execute=True,
         )
         assert cr.status == "cleaned"
-
-        # data survived every delegated op
+        # Spark actually removed the planted orphan…
+        assert not orphan.exists(), "Spark remove_orphan_files did not delete the planted orphan"
+        # …and left every referenced live file + all rows intact
+        assert live.exists()
         assert catalog.load_table("db.t").scan().to_arrow().num_rows == 300
     finally:
         spark.stop()

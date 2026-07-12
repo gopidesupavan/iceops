@@ -185,7 +185,23 @@ def test_trino_backs_expire_rewrite_and_clean_orphans(trino_stack):
     er = expire(catalog, "db.maint", retain_last=1, older_than=dt.timedelta(0), **common)
     assert er.snapshot_count_after < er.plan.snapshot_count
 
-    cr = clean_orphans(catalog, "db.maint", older_than=dt.timedelta(0), **common)
-    assert cr.status == "cleaned"
+    # clean-orphans via Trino — plant a REAL orphan object in MinIO and prove Trino
+    # deletes it (S3-scale orphan removal is the whole point of engine clean-orphans).
+    import time
 
+    table = catalog.load_table("db.maint")
+    live_path = str(table.inspect.files().column("file_path").to_pylist()[0])
+    orphan_path = live_path.rsplit("/", 1)[0] + "/planted-orphan.parquet"
+    with table.io.new_input(live_path).open() as src:
+        payload = src.read()
+    out = table.io.new_output(orphan_path)
+    with out.create(overwrite=True) as dst:
+        dst.write(payload)
+    assert table.io.new_input(orphan_path).exists()
+    time.sleep(2)  # let the object age past the retention threshold used below
+
+    cr = clean_orphans(catalog, "db.maint", older_than=dt.timedelta(seconds=1), **common)
+    assert cr.status == "cleaned"
+    # Trino actually removed the planted S3 orphan, and live data is intact
+    assert not table.io.new_input(orphan_path).exists(), "Trino did not delete the S3 orphan"
     assert catalog.load_table("db.maint").scan().to_arrow().num_rows == 600
