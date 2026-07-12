@@ -1,7 +1,4 @@
-"""In-process engine (Arrow/DuckDB). The default: no cluster, no JVM.
-
-v0.1 carries the structure only; action executors arrive with the fix operators in v0.2.
-"""
+"""In-process engine (Arrow/DuckDB). The default: no cluster, no JVM."""
 
 from __future__ import annotations
 
@@ -14,5 +11,5 @@ class NativeEngine:
 
     def execute(self, plan: Plan) -> list[ActionResult]:
         if plan.actions:
-            raise NotYetImplemented(f"native execution of '{plan.actions[0].op}'", "v0.2")
+            raise NotYetImplemented(f"native execution of '{plan.actions[0].op}'")
         return []

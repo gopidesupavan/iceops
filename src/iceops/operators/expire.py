@@ -1,4 +1,4 @@
-"""Snapshot expiration — the first fix operator.
+"""Snapshot expiration.
 
 WHY THIS EXISTS
     Every write creates a snapshot (a "save point"); Iceberg never discards them on its
@@ -30,8 +30,6 @@ HOW IT WORKS — THE FLOW
          files (verified from source; pinned by a test that fails if an upgrade changes
          this). Freed storage comes later, from clean-orphans. We therefore report bytes
          as "become unreferenced", never "freed".
-
-See design/plan-v0.2-expire.md for the full rationale.
 """
 
 from __future__ import annotations

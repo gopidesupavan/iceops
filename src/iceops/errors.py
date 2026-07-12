@@ -16,13 +16,11 @@ class TableNotFoundError(IceopsError):
 
 
 class NotYetImplemented(IceopsError):
-    """The operation has a home in iceops but its body ships in a later version."""
+    """The operation has a home in iceops but is not implemented yet."""
 
-    def __init__(self, op: str, version: str) -> None:
+    def __init__(self, op: str) -> None:
         self.op = op
-        self.version = version
         super().__init__(
-            f"'{op}' is on the iceops roadmap for {version}. "
-            f"v0.1 is the read-only diagnose slice (scan / doctor / cost) — "
+            f"'{op}' is not implemented yet — "
             f"see https://github.com/gopidesupavan/iceops#what-works-today"
         )

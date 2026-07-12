@@ -1,8 +1,7 @@
 """Federated data-file compaction.
 
-The first compaction path deliberately delegates the data rewrite to Spark or Trino.
-iceops owns the plan, safety gates, and lifecycle ordering; the engine owns the actual
-Iceberg rewrite procedure. Native Arrow compaction remains a later slice.
+Compaction delegates the data rewrite to Spark or Trino. iceops owns the plan, safety
+gates, and lifecycle ordering; the engine owns the actual Iceberg rewrite procedure.
 """
 
 from __future__ import annotations

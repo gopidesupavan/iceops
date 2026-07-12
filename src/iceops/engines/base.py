@@ -1,7 +1,7 @@
 """Engine protocol: operators produce Plans, engines execute them.
 
-Diagnose operators never need an engine. Fix operators (v0.2) plan via the catalog and
-hand heavy file work to whichever engine is configured.
+Diagnose operators never need an engine. Fix operators plan via the catalog and hand
+heavy file work to whichever engine is configured.
 """
 
 from __future__ import annotations

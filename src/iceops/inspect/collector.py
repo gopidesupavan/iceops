@@ -151,7 +151,7 @@ def _collect_storage(table: "Table", metrics: TableMetrics) -> None:
     """Reachable bytes across all snapshots, plus a filesystem-level orphan estimate.
 
     The orphan estimate only works where we can list the storage cheaply — local
-    warehouses for now. Object stores get this in v0.2 alongside clean-orphans.
+    warehouses. Object stores report this as unknown.
     """
     metrics.reachable_bytes = _reachable_bytes(table)
     local_root = _local_path(table.location())

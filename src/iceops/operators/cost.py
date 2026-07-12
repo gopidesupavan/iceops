@@ -9,8 +9,8 @@ THE FLOW
     1. `collect(table)` reuses the doctor pipeline's metrics
     2. stale = reachable(all snapshots) − (current data + current delete files),
        clamped ≥ 0. This is an UPPER BOUND: it assumes expiring every old snapshot.
-    3. orphan estimate comes from the collector (local warehouses only in v0.1;
-       object stores report "unavailable" as an explicit note — never a silent zero)
+    3. orphan estimate comes from the collector (local warehouses only; object stores
+       report "unavailable" as an explicit note — never a silent zero)
     4. monthly waste = (stale + orphan) / 1024³ × --dollars-per-gb-month
        (default 0.023, S3 Standard). Unknowable buckets are excluded and noted,
        so the total is a floor, never an exaggeration.
@@ -64,8 +64,7 @@ def cost(
 
     if metrics.orphan_bytes_estimate is None:
         report.notes.append(
-            "orphan estimate unavailable for this storage scheme in v0.1 "
-            "(local warehouses only; object stores come with clean-orphans in v0.2)"
+            "orphan estimate unavailable for this storage scheme (local warehouses only)"
         )
 
     waste = (report.stale_bytes or 0) + (report.orphan_bytes_estimate or 0)

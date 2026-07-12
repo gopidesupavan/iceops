@@ -5,7 +5,7 @@ from typing import Optional
 from ..models import Finding, Severity, TableMetrics, human_bytes
 from .base import check
 
-WARN_BYTES = 1 * 1024 * 1024  # local-warehouse heuristic; object stores come in v0.2
+WARN_BYTES = 1 * 1024 * 1024  # local-warehouse heuristic
 
 
 @check("orphan-files")

@@ -36,7 +36,7 @@ HOW IT WORKS — THE FLOW
          byte-for-byte identical, and no merge property leaked. On any mismatch: raise
          with rollback instructions (the pre-rewrite snapshot still exists).
 
-Discovered by probe against PyIceberg 0.11.1 source — see design/plan-v0.2-manifests.md.
+The empty-merge-append technique is verified against PyIceberg 0.11.1 source.
 """
 
 from __future__ import annotations

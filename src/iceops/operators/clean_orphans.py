@@ -33,8 +33,6 @@ HOW IT WORKS — THE FLOW
          a literal log of every deleted path is kept
       8. worst failure mode by construction: deleting too LITTLE. A crash mid-run just
          leaves fewer orphans; re-running resumes safely.
-
-Safety rationale and decoy-test requirements: design/plan-v0.2-orphans.md.
 """
 
 from __future__ import annotations

@@ -11,8 +11,7 @@ EVERY COMMAND FOLLOWS THE SAME FLOW
                   2 = error (CI scripts key on these)
 
 Fix commands share one convention enforced by the operators themselves: dry-run unless
---yes, refuse externally-managed tables unless --force. Not-yet-built operators are
-registered as stubs that print the roadmap instead of "no such command".
+--yes, refuse externally-managed tables unless --force.
 """
 
 from __future__ import annotations
