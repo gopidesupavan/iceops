@@ -14,7 +14,7 @@ Engine backends are optional extras (only if you'll delegate to Spark/Trino):
 ```bash
 pip install "iceops[spark]"    # compaction and maintenance via Spark
 pip install "iceops[trino]"    # via Trino
-pip install "iceops[glue]"     # AWS Glue catalog
+pip install "iceops[glue]"     # AWS Glue catalog (via pyiceberg[glue]/boto3)
 ```
 
 ## Point iceops at a catalog
@@ -30,8 +30,10 @@ uri = "https://polaris.example.com/api/catalog"
 credential = "…"
 ```
 
-Any REST-spec catalog works: Polaris, Nessie, Gravitino, Lakekeeper. AWS Glue via
-`iceops[glue]`; Hive and SQL catalogs too.
+Catalog support comes from PyIceberg, so any catalog PyIceberg supports works: any
+REST-spec catalog (Polaris, Nessie, Gravitino, Lakekeeper), plus SQL and Hive. AWS Glue is
+available via `iceops[glue]` (a pass-through to `pyiceberg[glue]`/boto3) — supported through
+PyIceberg but not yet exercised by the iceops test suite.
 
 ## Try it on a throwaway local lakehouse
 

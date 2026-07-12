@@ -135,8 +135,10 @@ master = "local[*]"
 # "spark.sql.catalog.demo.warehouse" = "file:///path/to/warehouse"
 ```
 
-Any Iceberg REST-spec catalog works: Polaris, Nessie, Gravitino, Lakekeeper. AWS Glue via
-`pip install iceops[glue]`.
+Catalog connectivity is PyIceberg's, so any catalog it supports works: any REST-spec catalog
+(Polaris, Nessie, Gravitino, Lakekeeper), plus SQL and Hive. AWS Glue is available via
+`pip install "iceops[glue]"` — that extra is a pass-through to `pyiceberg[glue]` (boto3);
+Glue works through PyIceberg but isn't yet exercised by the iceops test suite.
 
 ## Design in one paragraph
 
