@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/iceops-logo.svg" alt="iceops logo" width="96" height="96">
+</p>
+
 # iceops
 
 **Doctor, janitor, and autopilot for your Apache Iceberg lakehouse — in one `pip install`.**

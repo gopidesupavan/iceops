@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "iceops"
 version = "0.1.0"
-description = "Doctor, janitor, and autopilot for Apache Iceberg tables — no platform required."
+description = "Maintenance Tool for Apache Iceberg tables — no cluster required."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
-authors = [{ name = "Gopi Desupavan", email = "gopidesupavan@gmail.com" }]
+authors = [{ name = "Pavan Kumar Gopidesu"}]
 keywords = ["iceberg", "lakehouse", "data-engineering", "maintenance", "compaction", "cli"]
 classifiers = [
   "Development Status :: 3 - Alpha",

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" role="img" aria-labelledby="iceops-title iceops-desc">
+  <title id="iceops-title">iceops</title>
+  <desc id="iceops-desc">Fragmented data files converging into a single compacted facet.</desc>
+  <rect width="120" height="120" rx="26" fill="#0E2A63"/>
+  <g fill="#7FE0F5">
+    <rect x="20" y="52" width="4" height="16" rx="2"/>
+    <rect x="28" y="46" width="4" height="28" rx="2"/>
+    <rect x="36" y="41" width="4" height="38" rx="2"/>
+    <rect x="44" y="47" width="4" height="26" rx="2"/>
+  </g>
+  <path d="M52 45 L70 58" fill="none" stroke="#2E7BD6" stroke-width="3" stroke-linecap="round"/>
+  <path d="M52 75 L70 62" fill="none" stroke="#2E7BD6" stroke-width="3" stroke-linecap="round"/>
+  <path d="M86 40 L104 60 L86 80 L68 60 Z" fill="#35C7E6"/>
+  <path d="M86 40 L86 80 L68 60 Z" fill="#CFF3FF"/>
+</svg>
