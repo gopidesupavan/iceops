@@ -147,11 +147,16 @@ class ExpirePlan(BaseModel):
     protected_ids: list[int] = Field(default_factory=list)
     unreferenced_data_bytes: Optional[int] = None
     unreferenced_manifest_bytes: Optional[int] = None
+    engine: Optional[str] = None  # None = native; set = delegated to spark/trino
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
     @property
     def actionable(self) -> bool:
+        # engine mode delegates candidate selection to the engine, so we can't enumerate
+        # candidates up front — treat an engine plan as actionable if any snapshots exist
+        if self.engine is not None:
+            return self.snapshot_count > 0
         return bool(self.candidates)
 
 
@@ -159,6 +164,7 @@ class ExpireResult(BaseModel):
     plan: ExpirePlan
     expired_snapshot_ids: list[int] = Field(default_factory=list)
     snapshot_count_after: int = 0
+    action_results: list["ActionResult"] = Field(default_factory=list)
     status: str = "expired"  # expired | nothing-to-do
 
 
@@ -169,11 +175,15 @@ class RewriteManifestsPlan(BaseModel):
     files_per_manifest: float = 0.0
     estimated_after: int = 0
     target_manifest_size_bytes: int = 0
+    engine: Optional[str] = None  # None = native; set = delegated to spark/trino
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
     @property
     def actionable(self) -> bool:
+        # engine mode delegates file selection; actionable if there is >1 manifest to merge
+        if self.engine is not None:
+            return self.manifest_count > 1
         return self.manifest_count > 1 and self.estimated_after < self.manifest_count
 
 
@@ -182,6 +192,7 @@ class RewriteManifestsResult(BaseModel):
     manifests_before: int = 0
     manifests_after: int = 0
     new_snapshot_id: Optional[int] = None
+    action_results: list["ActionResult"] = Field(default_factory=list)
     status: str = "rewritten"  # rewritten | nothing-to-do
 
 
@@ -201,11 +212,16 @@ class CleanOrphansPlan(BaseModel):
     reachable_count: int = 0
     skipped: dict[str, int] = Field(default_factory=dict)  # young/excluded/metadata-json
     older_than_days: float = 3.0
+    engine: Optional[str] = None  # None = native; set = delegated to spark/trino
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
     @property
     def actionable(self) -> bool:
+        # engine mode delegates listing to the engine; there's always potentially
+        # something to reclaim, so an engine plan is treated as actionable
+        if self.engine is not None:
+            return True
         return bool(self.candidates)
 
 
@@ -215,6 +231,7 @@ class CleanOrphansResult(BaseModel):
     freed_bytes: int = 0
     missing: list[str] = Field(default_factory=list)  # already gone when we got there
     spared: list[str] = Field(default_factory=list)  # re-check found them referenced
+    action_results: list["ActionResult"] = Field(default_factory=list)
     status: str = "cleaned"  # cleaned | nothing-to-do
 
 

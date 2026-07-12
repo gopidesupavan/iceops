@@ -163,9 +163,32 @@ def render_cost(report: CostReport) -> None:
         console.print(f"[dim]note: {note}[/dim]")
 
 
+def _render_engine_op(
+    label: str, identifier: str, engine: str, executed: object, show_footer: bool
+) -> None:
+    """Uniform view for an engine-delegated fix op: the engine picks the work and applies
+    its own safety; iceops shows the parameters and relays the outcome."""
+    console.print(f"plan: {label} {identifier} via {engine}")
+    console.print(
+        f"[dim]{engine} selects the exact work and applies its own retention/reachability; "
+        f"iceops relays the result[/dim]"
+    )
+    if executed is None:
+        if show_footer:
+            console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        return
+    console.print(f"[green]{label} submitted to {engine}[/green]")
+    for action_result in getattr(executed, "action_results", []) or []:
+        for key, value in sorted(action_result.details.items()):
+            console.print(f"  {key}: {value}")
+
+
 def render_expire_plan(
     plan: ExpirePlan, executed: ExpireResult | None = None, show_footer: bool = True
 ) -> None:
+    if plan.engine is not None:
+        _render_engine_op("expire", plan.identifier, plan.engine, executed, show_footer)
+        return
     if not plan.candidates:
         console.print(
             f"{plan.identifier}: nothing to expire "
@@ -211,6 +234,9 @@ def render_rewrite_manifests_plan(
     executed: RewriteManifestsResult | None = None,
     show_footer: bool = True,
 ) -> None:
+    if plan.engine is not None:
+        _render_engine_op("rewrite-manifests", plan.identifier, plan.engine, executed, show_footer)
+        return
     if not plan.actionable:
         console.print(
             f"{plan.identifier}: nothing to rewrite ({plan.manifest_count} manifests, "
@@ -245,6 +271,9 @@ def render_clean_orphans_plan(
     executed: CleanOrphansResult | None = None,
     show_footer: bool = True,
 ) -> None:
+    if plan.engine is not None:
+        _render_engine_op("clean-orphans", plan.identifier, plan.engine, executed, show_footer)
+        return
     skipped_note = "  ".join(f"{k}: {v}" for k, v in plan.skipped.items()) if plan.skipped else ""
     if not plan.actionable:
         console.print(

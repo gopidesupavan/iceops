@@ -40,6 +40,7 @@ import datetime as dt
 from typing import TYPE_CHECKING, Optional
 
 from ..catalog.detect import STREAMING_SNAPSHOTS_PER_DAY, managed_by
+from ..engines import submit
 from ..errors import IceopsError, TableNotFoundError
 from ..models import ExpireCandidate, ExpirePlan, ExpireResult
 
@@ -76,6 +77,9 @@ def expire(
     identifier: str,
     retain_last: int = DEFAULT_RETAIN_LAST,
     older_than: dt.timedelta = DEFAULT_OLDER_THAN,
+    engine: Optional[str] = None,
+    engine_catalog: Optional[str] = None,
+    engine_config: Optional[dict] = None,
     execute: bool = False,
     force: bool = False,
 ) -> ExpirePlan | ExpireResult:
@@ -91,10 +95,69 @@ def expire(
             f"optimizer's back causes commit conflicts. Use --force to override."
         )
 
+    if engine is not None:
+        return _expire_via_engine(
+            table,
+            identifier,
+            retain_last,
+            older_than,
+            engine,
+            engine_catalog,
+            engine_config,
+            execute,
+        )
+
     plan = _build_plan(table, identifier, retain_last, older_than)
     if not execute:
         return plan
     return _execute(table, plan)
+
+
+def _expire_via_engine(
+    table: "Table",
+    identifier: str,
+    retain_last: int,
+    older_than: dt.timedelta,
+    engine: str,
+    engine_catalog: Optional[str],
+    engine_config: Optional[dict],
+    execute: bool,
+) -> ExpirePlan | ExpireResult:
+    """Delegate expiry to the engine's expire_snapshots procedure. The engine selects
+    which snapshots to drop (and deletes their files); iceops passes retain_last +
+    older_than and reports before/after counts."""
+    snapshots = table.metadata.snapshots or []
+    cutoff = dt.datetime.now(dt.timezone.utc) - older_than
+    plan = ExpirePlan(
+        identifier=identifier,
+        retain_last=retain_last,
+        cutoff=cutoff,
+        snapshot_count=len(snapshots),
+        engine=engine,
+    )
+    if not execute:
+        return plan
+    if not engine_catalog:
+        raise IceopsError("engine expiry needs --engine-catalog so the engine finds the table")
+
+    results = submit(
+        engine,
+        "expire",
+        identifier,
+        {
+            "engine_catalog": engine_catalog,
+            "table": identifier,
+            "retain_last": retain_last,
+            "older_than_seconds": int(older_than.total_seconds()),
+        },
+        engine_config,
+    )
+    table.refresh()
+    return ExpireResult(
+        plan=plan,
+        snapshot_count_after=len(table.metadata.snapshots or []),
+        action_results=results,
+    )
 
 
 def _build_plan(

@@ -8,8 +8,17 @@ from pyiceberg.catalog import load_catalog
 
 from iceops.operators import compact
 
-ICEBERG_RUNTIME = "org.apache.iceberg:iceberg-spark-runtime-4.0_2.13:1.11.0"
 SQLITE_JDBC = "org.xerial:sqlite-jdbc:3.53.2.0"
+
+
+def _iceberg_runtime() -> str:
+    """Match the Iceberg Spark runtime to the installed PySpark's major.minor — a
+    mismatch (e.g. Spark 4.1 with the 4.0 runtime) throws NoSuchMethodError deep inside
+    the metadata-table procedures (rewrite_manifests/expire/remove_orphan_files)."""
+    import pyspark
+
+    major_minor = ".".join(pyspark.__version__.split(".")[:2])
+    return f"org.apache.iceberg:iceberg-spark-runtime-{major_minor}_2.13:1.11.0"
 
 
 pytestmark = pytest.mark.skipif(
@@ -24,7 +33,7 @@ def test_spark_compact_rewrites_real_iceberg_table(tmp_path: Path):
     catalog_name = "sparklabtest"
     warehouse = tmp_path / "warehouse"
     catalog_db = tmp_path / "catalog.db"
-    packages = f"{ICEBERG_RUNTIME},{SQLITE_JDBC}"
+    packages = f"{_iceberg_runtime()},{SQLITE_JDBC}"
 
     spark = (
         SparkSession.builder.appName("iceops-spark-compact-test")
@@ -93,3 +102,91 @@ def test_spark_compact_rewrites_real_iceberg_table(tmp_path: Path):
     assert result.action_results[0].details["row_0"]["added_data_files_count"] == 1
     assert table.inspect.files().num_rows == 1
     assert table.scan().to_arrow().num_rows == 600
+
+
+def test_spark_backs_expire_rewrite_and_clean_orphans(tmp_path: Path):
+    """Every non-compact fix operator, delegated to a real Spark, in one session."""
+    import datetime as dt
+
+    from pyspark.sql import SparkSession
+
+    from iceops.operators import clean_orphans, expire, rewrite_manifests
+
+    catalog_name = "sparkmaint"
+    warehouse = tmp_path / "warehouse"
+    catalog_db = tmp_path / "catalog.db"
+    packages = f"{_iceberg_runtime()},{SQLITE_JDBC}"
+
+    spark = (
+        SparkSession.builder.appName("iceops-spark-maint-test")
+        .master("local[2]")
+        .config("spark.jars.packages", packages)
+        .config(
+            "spark.sql.extensions",
+            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+        )
+        .config(f"spark.sql.catalog.{catalog_name}", "org.apache.iceberg.spark.SparkCatalog")
+        .config(
+            f"spark.sql.catalog.{catalog_name}.catalog-impl", "org.apache.iceberg.jdbc.JdbcCatalog"
+        )
+        .config(f"spark.sql.catalog.{catalog_name}.uri", f"jdbc:sqlite:{catalog_db}")
+        .config(f"spark.sql.catalog.{catalog_name}.warehouse", warehouse.as_uri())
+        .config(f"spark.sql.catalog.{catalog_name}.jdbc.schema-version", "V1")
+        .getOrCreate()
+    )
+    try:
+        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {catalog_name}.db")
+        spark.sql(f"CREATE TABLE {catalog_name}.db.t (id BIGINT) USING iceberg")
+        for i in range(6):  # 6 snapshots, 6 manifests
+            spark.range(i * 50, (i + 1) * 50).writeTo(f"{catalog_name}.db.t").append()
+
+        catalog = load_catalog(
+            catalog_name, type="sql", uri=f"sqlite:///{catalog_db}", warehouse=warehouse.as_uri()
+        )
+        cfg = {"session": spark}
+        assert catalog.load_table("db.t").inspect.manifests().num_rows == 6
+        assert catalog.load_table("db.t").scan().to_arrow().num_rows == 300
+
+        # rewrite-manifests via Spark
+        rr = rewrite_manifests(
+            catalog,
+            "db.t",
+            engine="spark",
+            engine_catalog=catalog_name,
+            engine_config=cfg,
+            execute=True,
+        )
+        assert rr.manifests_after < rr.manifests_before
+
+        # expire via Spark (retain 1, older_than 0)
+        er = expire(
+            catalog,
+            "db.t",
+            retain_last=1,
+            older_than=dt.timedelta(0),
+            engine="spark",
+            engine_catalog=catalog_name,
+            engine_config=cfg,
+            execute=True,
+        )
+        assert er.snapshot_count_after < er.plan.snapshot_count
+
+        # clean-orphans via Spark. Spark hardcodes a 24h minimum for remove_orphan_files
+        # (no SQL override, unlike Trino's configurable min-retention) — iceops surfaces
+        # the engine's own safety, so we pass a realistic window. On a fresh table this
+        # finds no orphans but proves the delegation path runs against real Spark.
+        cr = clean_orphans(
+            catalog,
+            "db.t",
+            older_than=dt.timedelta(hours=25),
+            engine="spark",
+            engine_catalog=catalog_name,
+            engine_config=cfg,
+            execute=True,
+        )
+        assert cr.status == "cleaned"
+
+        # data survived every delegated op
+        assert catalog.load_table("db.t").scan().to_arrow().num_rows == 300
+    finally:
+        spark.stop()

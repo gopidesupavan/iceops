@@ -50,6 +50,12 @@ app = typer.Typer(
 
 CatalogOpt = typer.Option(None, "--catalog", "-c", help="catalog profile name")
 JsonOpt = typer.Option(False, "--json", help="emit machine-readable JSON instead of tables")
+EngineOpt = typer.Option(
+    None, "--engine", help="delegate execution to an engine (spark|trino); omit for native"
+)
+EngineCatalogOpt = typer.Option(
+    None, "--engine-catalog", help="catalog name the engine uses (defaults to the profile)"
+)
 
 
 def _fail(message: str) -> "typer.Exit":
@@ -161,16 +167,19 @@ def expire(
     older_than: str = typer.Option(
         "7d", "--older-than", help="only expire snapshots older than this (e.g. 12h, 7d, 2w)"
     ),
+    engine: Optional[str] = EngineOpt,
+    engine_catalog: Optional[str] = EngineCatalogOpt,
     yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
     force: bool = typer.Option(
         False, "--force", help="proceed even if another optimizer manages the table"
     ),
     json_output: bool = JsonOpt,
 ) -> None:
-    """Expire old snapshots (metadata only; dry-run by default).
+    """Expire old snapshots (dry-run by default).
 
-    A snapshot is expired only if it is BOTH beyond --retain-last AND older than
-    --older-than. Branch/tag heads and the current snapshot are never expired.
+    Native (default) keeps metadata-only semantics. With --engine spark|trino the engine's
+    expire_snapshots runs instead (and deletes files too). A snapshot is expired only if it
+    is BOTH beyond --retain-last AND older than --older-than; refs are never expired.
     """
     name, identifier = _resolve(table, catalog)
     try:
@@ -183,6 +192,9 @@ def expire(
             identifier,
             retain_last=retain_last,
             older_than=cutoff,
+            engine=engine,
+            engine_catalog=engine_catalog or (name if engine else None),
+            engine_config=load_engine_config(engine) if engine else None,
             execute=yes,
             force=force,
         )
@@ -191,13 +203,12 @@ def expire(
 
     plan = outcome.plan if isinstance(outcome, ExpireResult) else outcome
     result = outcome if isinstance(outcome, ExpireResult) else None
+    did_work = bool(result and (result.expired_snapshot_ids or result.action_results))
     if json_output:
         print(outcome.model_dump_json(indent=2))
     else:
-        render.render_expire_plan(
-            plan, executed=result if result and result.expired_snapshot_ids else None
-        )
-    if not yes and plan.candidates:
+        render.render_expire_plan(plan, executed=result if did_work else None)
+    if not yes and plan.actionable:
         raise typer.Exit(EXIT_FINDINGS)  # work is planned but nothing was done
 
 
@@ -208,16 +219,18 @@ def rewrite_manifests_cmd(
     target_manifest_size: str = typer.Option(
         "8MB", "--target-manifest-size", help="bin-pack manifests to roughly this size"
     ),
+    engine: Optional[str] = EngineOpt,
+    engine_catalog: Optional[str] = EngineCatalogOpt,
     yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
     force: bool = typer.Option(
         False, "--force", help="proceed even if another optimizer manages the table"
     ),
     json_output: bool = JsonOpt,
 ) -> None:
-    """Consolidate fragmented manifests (metadata only; dry-run by default).
+    """Consolidate fragmented manifests (dry-run by default).
 
-    Fixes the manifest-fragmentation finding: many small manifests make query planning
-    slow. No data files are touched; one new snapshot is created.
+    Native (default) is metadata-only. With --engine spark|trino the engine's
+    rewrite_manifests / optimize_manifests runs instead.
     """
     name, identifier = _resolve(table, catalog)
     try:
@@ -229,6 +242,9 @@ def rewrite_manifests_cmd(
             connect(name),
             identifier,
             target_manifest_size=target,
+            engine=engine,
+            engine_catalog=engine_catalog or (name if engine else None),
+            engine_config=load_engine_config(engine) if engine else None,
             execute=yes,
             force=force,
         )
@@ -258,6 +274,8 @@ def clean_orphans_cmd(
         [], "--exclude", help="filename glob to protect (repeatable), e.g. '_SUCCESS'"
     ),
     batch_size: int = typer.Option(100, "--batch-size", help="deletes per re-check batch"),
+    engine: Optional[str] = EngineOpt,
+    engine_catalog: Optional[str] = EngineCatalogOpt,
     yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
     force: bool = typer.Option(
         False, "--force", help="proceed even if another optimizer manages the table"
@@ -266,9 +284,9 @@ def clean_orphans_cmd(
 ) -> None:
     """Delete files no snapshot references (dry-run by default).
 
-    The only iceops command that deletes physical files. Orphans come from failed
-    writes and from expire/rewrite-manifests unreferencing old versions.
-    *.metadata.json files are never deleted.
+    The only iceops command that deletes physical files. Native applies iceops' own safety
+    funnel; with --engine spark|trino the engine's remove_orphan_files runs instead (its
+    own retention + reachability — battle-tested for object stores at scale).
     """
     name, identifier = _resolve(table, catalog)
     try:
@@ -282,6 +300,9 @@ def clean_orphans_cmd(
             older_than=cutoff,
             exclude=tuple(exclude),
             batch_size=batch_size,
+            engine=engine,
+            engine_catalog=engine_catalog or (name if engine else None),
+            engine_config=load_engine_config(engine) if engine else None,
             execute=yes,
             force=force,
         )

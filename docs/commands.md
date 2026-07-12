@@ -157,6 +157,34 @@ Compaction rewrites data into a new snapshot but does not reclaim old physical f
 itself. Reclaim remains the normal safe lifecycle: compact, then `expire`, then
 `clean-orphans`.
 
+## Native vs. engine execution
+
+Every fix command runs **natively by default** (no cluster) and can instead **delegate to
+an engine** with `--engine spark|trino`:
+
+| Command | Native (default) | With `--engine` |
+| --- | --- | --- |
+| `expire` | PyIceberg, metadata-only | engine's `expire_snapshots` (also deletes files) |
+| `rewrite-manifests` | PyIceberg | engine's `rewrite_manifests` / `optimize_manifests` |
+| `clean-orphans` | iceops' own safety funnel | engine's `remove_orphan_files` |
+| `compact` | not available yet | required: engine's `rewrite_data_files` / `optimize` |
+
+Use native for the no-cluster path; use an engine when you already run one, want a single
+governed execution path, or need scale. The standout is **clean-orphans via engine** —
+Spark/Trino's `remove_orphan_files` is battle-tested for object-store listing at scale.
+In engine mode the engine selects the exact work and applies **its own** retention and
+reachability (e.g. Spark hardcodes a 24h minimum for orphan removal; Trino's is
+configurable). Configure connections in `.iceops.toml`:
+
+```toml
+[engines.spark]
+master = "local[*]"          # or remote_uri = "sc://spark-connect-host:15002"
+[engines.trino]
+host = "trino.example.com"
+port = 8080
+user = "iceops"
+```
+
 ## iceops tune — run all maintenance in the right order
 
 ```console

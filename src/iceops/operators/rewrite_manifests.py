@@ -45,6 +45,7 @@ import math
 from typing import TYPE_CHECKING, Optional
 
 from ..catalog.detect import managed_by
+from ..engines import submit
 from ..errors import IceopsError, TableNotFoundError
 from ..models import RewriteManifestsPlan, RewriteManifestsResult
 
@@ -64,6 +65,9 @@ def rewrite_manifests(
     catalog: "Catalog",
     identifier: str,
     target_manifest_size: int = DEFAULT_TARGET_MANIFEST_SIZE,
+    engine: Optional[str] = None,
+    engine_catalog: Optional[str] = None,
+    engine_config: Optional[dict] = None,
     execute: bool = False,
     force: bool = False,
 ) -> RewriteManifestsPlan | RewriteManifestsResult:
@@ -79,10 +83,62 @@ def rewrite_manifests(
             f"another optimizer's back causes commit conflicts. Use --force to override."
         )
 
+    if engine is not None:
+        return _rewrite_via_engine(
+            table,
+            identifier,
+            target_manifest_size,
+            engine,
+            engine_catalog,
+            engine_config,
+            execute,
+        )
+
     plan = _build_plan(table, identifier, target_manifest_size)
     if not execute:
         return plan
     return _execute(table, plan)
+
+
+def _rewrite_via_engine(
+    table: "Table",
+    identifier: str,
+    target_manifest_size: int,
+    engine: str,
+    engine_catalog: Optional[str],
+    engine_config: Optional[dict],
+    execute: bool,
+) -> RewriteManifestsPlan | RewriteManifestsResult:
+    """Delegate manifest rewriting to the engine (Spark rewrite_manifests / Trino
+    optimize_manifests). The engine chooses the grouping; iceops reports before/after."""
+    before = table.inspect.manifests().num_rows if table.current_snapshot() else 0
+    plan = RewriteManifestsPlan(
+        identifier=identifier,
+        manifest_count=before,
+        target_manifest_size_bytes=target_manifest_size,
+        engine=engine,
+    )
+    if not execute:
+        return plan
+    if not engine_catalog:
+        raise IceopsError("engine rewrite needs --engine-catalog so the engine finds the table")
+
+    results = submit(
+        engine,
+        "rewrite_manifests",
+        identifier,
+        {"engine_catalog": engine_catalog, "table": identifier},
+        engine_config,
+    )
+    table.refresh()
+    current = table.current_snapshot()
+    return RewriteManifestsResult(
+        plan=plan,
+        manifests_before=before,
+        manifests_after=table.inspect.manifests().num_rows if current else 0,
+        new_snapshot_id=current.snapshot_id if current else None,
+        action_results=results,
+    )
 
 
 def estimate_after(groups: dict[int, list[int]], target: int) -> int:

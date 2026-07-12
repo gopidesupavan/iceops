@@ -83,6 +83,9 @@ def tune(
             catalog,
             identifier,
             target_manifest_size=target_manifest_size,
+            engine=engine,
+            engine_catalog=engine_catalog,
+            engine_config=engine_config,
             execute=exec_,
             force=force,
         )
@@ -93,6 +96,9 @@ def tune(
             identifier,
             retain_last=retain_last,
             older_than=older_than_expire,
+            engine=engine,
+            engine_catalog=engine_catalog,
+            engine_config=engine_config,
             execute=exec_,
             force=force,
         )
@@ -103,6 +109,9 @@ def tune(
             identifier,
             older_than=older_than_orphans,
             exclude=exclude,
+            engine=engine,
+            engine_catalog=engine_catalog,
+            engine_config=engine_config,
             execute=exec_,
             force=force,
         )

@@ -151,3 +151,41 @@ def test_trino_compacts_a_pyiceberg_written_table(trino_stack):
     cur = conn.cursor()
     cur.execute("SELECT count(*) FROM iceberg.db.events")
     assert cur.fetchone()[0] == 800
+
+
+def test_trino_backs_expire_rewrite_and_clean_orphans(trino_stack):
+    """expire / optimize_manifests / remove_orphan_files via real Trino on MinIO."""
+    import datetime as dt
+
+    from iceops.operators import clean_orphans, expire, rewrite_manifests
+
+    catalog = _rest_catalog()
+    try:
+        catalog.drop_table("db.maint")
+    except Exception:
+        pass
+    try:
+        catalog.create_namespace("db")
+    except Exception:
+        pass
+
+    batch = pa.table({"id": pa.array(range(100), type=pa.int64())})
+    table = catalog.create_table("db.maint", schema=batch.schema)
+    for _ in range(6):
+        table.append(batch)
+    table = catalog.load_table("db.maint")
+    assert table.inspect.manifests().num_rows == 6
+
+    cfg = {"host": TRINO_HOST, "port": TRINO_PORT, "user": "iceops", "catalog": "iceberg"}
+    common = dict(engine="trino", engine_catalog="iceberg", engine_config=cfg, execute=True)
+
+    rr = rewrite_manifests(catalog, "db.maint", **common)
+    assert rr.manifests_after < rr.manifests_before
+
+    er = expire(catalog, "db.maint", retain_last=1, older_than=dt.timedelta(0), **common)
+    assert er.snapshot_count_after < er.plan.snapshot_count
+
+    cr = clean_orphans(catalog, "db.maint", older_than=dt.timedelta(0), **common)
+    assert cr.status == "cleaned"
+
+    assert catalog.load_table("db.maint").scan().to_arrow().num_rows == 600

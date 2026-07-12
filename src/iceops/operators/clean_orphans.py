@@ -110,6 +110,9 @@ def clean_orphans(
     older_than: dt.timedelta = DEFAULT_OLDER_THAN,
     exclude: tuple[str, ...] = (),
     batch_size: int = DEFAULT_BATCH_SIZE,
+    engine: Optional[str] = None,
+    engine_catalog: Optional[str] = None,
+    engine_config: Optional[dict] = None,
     execute: bool = False,
     force: bool = False,
 ) -> CleanOrphansPlan | CleanOrphansResult:
@@ -125,10 +128,57 @@ def clean_orphans(
             f"files that look orphaned mid-operation. Use --force to override."
         )
 
+    if engine is not None:
+        return _clean_via_engine(
+            table, identifier, older_than, engine, engine_catalog, engine_config, execute
+        )
+
     plan = _build_plan(table, identifier, older_than, exclude)
     if not execute:
         return plan
     return execute_plan(table, plan, batch_size)
+
+
+def _clean_via_engine(
+    table: "Table",
+    identifier: str,
+    older_than: dt.timedelta,
+    engine: str,
+    engine_catalog: Optional[str],
+    engine_config: Optional[dict],
+    execute: bool,
+) -> CleanOrphansPlan | CleanOrphansResult:
+    """Delegate orphan removal to the engine's remove_orphan_files (Spark's/Trino's are
+    battle-tested for object-store listing at scale). We deliberately DO NOT run our own
+    storage listing here — that expensive step is exactly what we're delegating. The
+    engine applies its own retention window and reachability."""
+    from ..engines import submit
+
+    plan = CleanOrphansPlan(
+        identifier=identifier,
+        location=table.location(),
+        older_than_days=older_than.total_seconds() / 86400,
+        engine=engine,
+    )
+    if not execute:
+        return plan
+    if not engine_catalog:
+        raise IceopsError(
+            "engine clean-orphans needs --engine-catalog so the engine finds the table"
+        )
+
+    results = submit(
+        engine,
+        "clean_orphans",
+        identifier,
+        {
+            "engine_catalog": engine_catalog,
+            "table": identifier,
+            "older_than_seconds": int(older_than.total_seconds()),
+        },
+        engine_config,
+    )
+    return CleanOrphansResult(plan=plan, action_results=results)
 
 
 def _build_plan(

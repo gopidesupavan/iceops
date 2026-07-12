@@ -2,12 +2,67 @@ from __future__ import annotations
 
 import pytest
 
-from iceops.engines.spark import build_spark_compact_sql, parse_engine_rows
-from iceops.engines.trino import build_trino_compact_sql
+from iceops.engines.spark import (
+    build_spark_clean_orphans_sql,
+    build_spark_compact_sql,
+    build_spark_expire_sql,
+    build_spark_rewrite_manifests_sql,
+    parse_engine_rows,
+)
+from iceops.engines.trino import (
+    build_trino_clean_orphans_sql,
+    build_trino_compact_sql,
+    build_trino_expire_sql,
+    build_trino_rewrite_manifests_sql,
+)
 from iceops.errors import IceopsError
 from iceops.models import Action, CompactPlan
 from iceops.operators import compact
 from iceops.operators.compact import verify_row_count
+
+
+def _op_action(op: str, **params) -> Action:
+    base = {"table": "db.events", "engine_catalog": "demo"}
+    return Action(op=op, table="db.events", params={**base, **params})
+
+
+class TestSparkMaintenanceSql:
+    def test_rewrite_manifests(self):
+        assert build_spark_rewrite_manifests_sql(_op_action("rewrite_manifests")) == (
+            "CALL `demo`.system.rewrite_manifests(table => 'demo.db.events')"
+        )
+
+    def test_expire_uses_timestamp_and_retain_last(self):
+        sql = build_spark_expire_sql(_op_action("expire", older_than_seconds=604800, retain_last=5))
+        assert "CALL `demo`.system.expire_snapshots(table => 'demo.db.events'" in sql
+        assert "older_than => TIMESTAMP '" in sql
+        assert "retain_last => 5)" in sql
+
+    def test_clean_orphans_uses_timestamp(self):
+        sql = build_spark_clean_orphans_sql(_op_action("clean_orphans", older_than_seconds=259200))
+        assert "CALL `demo`.system.remove_orphan_files(table => 'demo.db.events'" in sql
+        assert "older_than => TIMESTAMP '" in sql
+
+
+class TestTrinoMaintenanceSql:
+    def test_rewrite_manifests(self):
+        assert build_trino_rewrite_manifests_sql(_op_action("rewrite_manifests")) == (
+            'ALTER TABLE "demo"."db"."events" EXECUTE optimize_manifests'
+        )
+
+    def test_expire_uses_retention_threshold(self):
+        sql = build_trino_expire_sql(_op_action("expire", older_than_seconds=604800, retain_last=5))
+        assert sql == (
+            'ALTER TABLE "demo"."db"."events" '
+            "EXECUTE expire_snapshots(retention_threshold => '604800s')"
+        )
+
+    def test_clean_orphans_uses_retention_threshold(self):
+        sql = build_trino_clean_orphans_sql(_op_action("clean_orphans", older_than_seconds=0))
+        assert sql == (
+            'ALTER TABLE "demo"."db"."events" '
+            "EXECUTE remove_orphan_files(retention_threshold => '0s')"
+        )
 
 
 class TestRowCountVerification:

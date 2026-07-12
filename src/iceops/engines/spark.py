@@ -1,33 +1,82 @@
-"""Spark engine: submits CALL system.rewrite_data_files(...) to the user's Spark.
+"""Spark engine: submits Iceberg system procedures to the user's Spark.
 
 Requires: pip install iceops[spark]
 """
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 
 from ..errors import IceopsError
 from ..models import Action, ActionResult, Plan
 
 
-def build_spark_compact_sql(action: Action) -> str:
-    if action.op != "compact":
-        raise IceopsError(f"spark engine cannot execute '{action.op}'")
+def _procedure_target(action: Action) -> tuple[str, str]:
+    """(catalog, table-argument) shared by every procedure call."""
     catalog = str(action.params.get("engine_catalog") or "")
     table = str(action.params.get("table") or action.table)
-    target = int(action.params["target_file_size_bytes"])
     if not catalog:
-        raise IceopsError("spark compact action is missing engine_catalog")
+        raise IceopsError(f"spark {action.op} action is missing engine_catalog")
+    return catalog, _spark_table_arg(catalog, table)
+
+
+def build_spark_compact_sql(action: Action) -> str:
+    catalog, table_arg = _procedure_target(action)
+    target = int(action.params["target_file_size_bytes"])
     return (
         f"CALL {_quote_identifier(catalog)}.system.rewrite_data_files("
-        f"table => {_sql_string(_spark_table_arg(catalog, table))}, "
+        f"table => {_sql_string(table_arg)}, "
         "options => map("
         f"'target-file-size-bytes', '{target}', "
         "'min-input-files', '2'"
         ")"
         ")"
     )
+
+
+def build_spark_expire_sql(action: Action) -> str:
+    catalog, table_arg = _procedure_target(action)
+    older_than = _spark_timestamp(int(action.params["older_than_seconds"]))
+    retain_last = int(action.params["retain_last"])
+    return (
+        f"CALL {_quote_identifier(catalog)}.system.expire_snapshots("
+        f"table => {_sql_string(table_arg)}, "
+        f"older_than => TIMESTAMP '{older_than}', "
+        f"retain_last => {retain_last})"
+    )
+
+
+def build_spark_clean_orphans_sql(action: Action) -> str:
+    catalog, table_arg = _procedure_target(action)
+    older_than = _spark_timestamp(int(action.params["older_than_seconds"]))
+    return (
+        f"CALL {_quote_identifier(catalog)}.system.remove_orphan_files("
+        f"table => {_sql_string(table_arg)}, "
+        f"older_than => TIMESTAMP '{older_than}')"
+    )
+
+
+def build_spark_rewrite_manifests_sql(action: Action) -> str:
+    catalog, table_arg = _procedure_target(action)
+    return (
+        f"CALL {_quote_identifier(catalog)}.system.rewrite_manifests("
+        f"table => {_sql_string(table_arg)})"
+    )
+
+
+SPARK_SQL_BUILDERS = {
+    "compact": build_spark_compact_sql,
+    "expire": build_spark_expire_sql,
+    "clean_orphans": build_spark_clean_orphans_sql,
+    "rewrite_manifests": build_spark_rewrite_manifests_sql,
+}
+
+
+def _spark_timestamp(older_than_seconds: int) -> str:
+    """Spark procedures take an absolute cutoff TIMESTAMP; convert an age to now-age."""
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=older_than_seconds)
+    return cutoff.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def parse_engine_rows(rows: list[Any]) -> dict[str, Any]:
@@ -82,12 +131,23 @@ class SparkEngine:
     def execute(self, plan: Plan) -> list[ActionResult]:
         session = self._session or self._build_session()
         results: list[ActionResult] = []
-        for action in plan.actions:
-            sql = build_spark_compact_sql(action)
-            rows = session.sql(sql).collect()
-            results.append(
-                ActionResult(action=action, status="submitted", details=parse_engine_rows(rows))
-            )
+        # our older_than literals are UTC; pin the session so Spark interprets them as UTC
+        # (otherwise expire/remove_orphan_files compare against the wrong absolute time and
+        # silently do nothing). Restore the user's setting afterwards.
+        previous_tz = session.conf.get("spark.sql.session.timeZone", None)
+        session.conf.set("spark.sql.session.timeZone", "UTC")
+        try:
+            for action in plan.actions:
+                builder = SPARK_SQL_BUILDERS.get(action.op)
+                if builder is None:
+                    raise IceopsError(f"spark engine cannot execute '{action.op}'")
+                rows = session.sql(builder(action)).collect()
+                results.append(
+                    ActionResult(action=action, status="submitted", details=parse_engine_rows(rows))
+                )
+        finally:
+            if previous_tz is not None:
+                session.conf.set("spark.sql.session.timeZone", previous_tz)
         return results
 
     def _build_session(self) -> Any:
