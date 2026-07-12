@@ -112,9 +112,18 @@ jobs:
       - run: pip install iceops
       - run: iceops apply --policy iceops.yaml --yes
         env:
-          # your catalog credentials, as PyIceberg env vars
+          # Catalog config via PyIceberg env vars (used when the catalog is not defined
+          # in .iceops.toml). Format: PYICEBERG_CATALOG__<name>__<key> → catalog.<name>.<key>.
+          # A REST catalog needs at least type + uri:
+          PYICEBERG_CATALOG__PROD__TYPE: rest
           PYICEBERG_CATALOG__PROD__URI: ${{ secrets.CATALOG_URI }}
+          PYICEBERG_CATALOG__PROD__CREDENTIAL: ${{ secrets.CATALOG_CREDENTIAL }}
 ```
+
+> The `PYICEBERG_CATALOG__*` variables are read by PyIceberg itself; iceops falls through
+> to PyIceberg's configuration when a catalog name isn't defined in `.iceops.toml`. See the
+> [PyIceberg configuration docs](https://py.iceberg.apache.org/configuration/) for the full
+> key list per catalog type.
 
 **cron:**
 
