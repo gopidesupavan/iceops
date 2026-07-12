@@ -1,8 +1,7 @@
 name: publish
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 permissions: {}
 
@@ -18,15 +17,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify tag matches package version
+      - name: Verify running on main
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
-          echo "release tag: $TAG   package version: $PKG"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "::error::release tag ($TAG) does not match pyproject version ($PKG)"
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::publish runs only from main (got $GITHUB_REF)"
             exit 1
           fi
+          PKG="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
+          echo "publishing version $PKG from main"
 
       - name: Build
         run: uv build
