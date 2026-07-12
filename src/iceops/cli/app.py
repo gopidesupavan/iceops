@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Optional
 
 import typer
+from rich.markup import escape
 
 from .. import __version__, operators
 from ..catalog import connect
@@ -59,7 +60,9 @@ EngineCatalogOpt = typer.Option(
 
 
 def _fail(message: str) -> "typer.Exit":
-    render.error_console.print(f"[red]error:[/red] {message}")
+    # escape the message: it can contain '[...]' (e.g. '[catalogs.demo]') that Rich
+    # would otherwise parse as markup and silently strip.
+    render.error_console.print(f"[red]error:[/red] {escape(message)}")
     return typer.Exit(EXIT_ERROR)
 
 
