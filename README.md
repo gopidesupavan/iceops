@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/iceops-logo.svg" alt="iceops logo" width="96" height="96">
+  <img src="docs/assets/iceops-logo.svg" alt="iceops logo" width="180" height="180">
 </p>
 
 # iceops
