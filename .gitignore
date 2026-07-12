@@ -19,6 +19,7 @@ spark_connect_lab_warehouse/
 # internal planning material — never published
 design/
 .claude/
+.agents/
 
 # IDE
 .idea/
