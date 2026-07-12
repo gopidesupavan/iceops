@@ -80,5 +80,8 @@ jobs:
       - name: Spark compaction lab (local JVM)
         run: ICEOPS_RUN_SPARK=1 uv run pytest tests/integration/test_spark_compact_lab.py
 
+      - name: Real-engine CLI execution e2e (iceops binary --engine spark --yes)
+        run: ICEOPS_RUN_SPARK=1 uv run pytest tests/e2e/test_engine_execution.py
+
       - name: Trino compaction lab (REST catalog + MinIO + Trino containers)
         run: ICEOPS_RUN_TRINO=1 uv run pytest tests/integration/test_trino_compact_lab.py
