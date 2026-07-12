@@ -70,8 +70,10 @@ def test_spark_compact_cli_dry_run(seeded_catalog):
     )
     assert result.exit_code == 1
     assert "DRY RUN" in result.stdout
-    assert "with spark" in result.stdout
-    assert "engine dry-run is an estimate" in result.stdout
+    assert "via spark" in result.stdout
+    assert "plan kind: delegated" in result.stdout
+    assert "statement:" in result.stdout
+    assert "rewrite_data_files" in result.stdout
 
 
 def test_spark_compact_cli_json_plan(seeded_catalog):
@@ -85,6 +87,8 @@ def test_spark_compact_cli_json_plan(seeded_catalog):
     assert payload["engine_catalog"] == "test"
     assert payload["action"]["op"] == "compact"
     assert payload["action"]["params"]["target_file_size_bytes"] == 512 * 1024 * 1024
+    assert payload["engine_contract"]["plan_kind"] == "delegated"
+    assert "rewrite_data_files" in payload["engine_contract"]["statement"]
 
 
 def test_expire_cli_dry_run_then_execute(seeded_catalog):

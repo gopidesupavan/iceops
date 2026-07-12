@@ -1,20 +1,41 @@
-# Example iceops policy — maintenance as code (executable from v0.3 via `iceops apply`).
-# Check this file into your repo next to your pipelines; any scheduler can run it.
+# Example iceops policy — per-table maintenance as code. Run with `iceops apply`.
+# Check this into your repo next to your pipelines; any scheduler can run it.
+#
+#   iceops apply --policy iceops.yaml            # dry run: per-table plan
+#   iceops apply --policy iceops.yaml --yes      # execute
 
 catalog: prod
+# engine: spark            # optional: run every op through an engine (native by default)
 
-tables:
-  - "db.events*"
-  - "db.orders"
-
-policy:
-  compact:
+# defaults apply to EVERY table, then each `tables` entry overrides field-by-field.
+defaults:
+  compact:                 # compact needs an engine (native compaction is not available yet)
     target-file-size: 512MB
-    when: small-file-ratio > 0.3
-
+    when: "small-file-ratio > 0.3"
+  rewrite-manifests:
+    when: "manifest-count > 50"
   expire-snapshots:
     retain-last: 10
     older-than: 7d
-
   clean-orphans:
     older-than: 3d
+
+# per-table control: hot tables aggressive, cold tables gentle, some untouched
+tables:
+  "db.events":
+    engine: spark          # this table is maintained by Spark
+    expire-snapshots:
+      retain-last: 50      # hot table keeps more time-travel history
+
+  "db.cold_*":
+    clean-orphans:
+      older-than: 1d       # cold tables: reclaim sooner
+
+  "db.audit":
+    disabled: true         # never touch this table
+
+# when: conditions compare a doctor metric to a number. Available metrics include:
+#   small-file-ratio, small-file-count, data-file-count, delete-file-count, delete-ratio,
+#   snapshot-count, manifest-count, partition-count, partition-file-skew,
+#   oldest-snapshot-age-days, total-data-bytes, avg-file-bytes
+# An op with no `when:` always runs; an op absent from a table's policy never runs.

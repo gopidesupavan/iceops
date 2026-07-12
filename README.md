@@ -53,6 +53,7 @@ Tables keep getting written to, so this is a cycle, not a pipeline — the same
 | `iceops rewrite-manifests <table>` | Consolidate fragmented manifests (metadata only) — dry-run by default |
 | `iceops clean-orphans <table>` | Delete files no snapshot references — dry-run by default, age-guarded |
 | `iceops tune <table>` | Run all maintenance in the right order (compact → rewrite-manifests → expire → clean-orphans) |
+| `iceops apply` | Run a per-table `iceops.yaml` policy across a catalog — maintenance as code |
 | `iceops compact <table> --engine spark` | Plan/submit data-file compaction through Spark — dry-run by default |
 | `iceops catalogs` | List configured catalog profiles |
 
@@ -73,10 +74,12 @@ supports `--exclude` globs, and re-verifies table metadata before every delete b
 case a writer committed mid-run.
 
 `compact` is federated first: iceops plans and renders the action, while Spark/Trino own
-the data-file rewrite. Storage reclaim still flows through `expire` then
-`clean-orphans`; compact never deletes physical files directly. Native Arrow compaction
-and `tune` land next; declarative policy (`iceops.yaml` + `iceops apply`) in v0.3; a
-stateless HTTP API (`iceops serve`) in v0.4.
+the data-file rewrite. Dry-run output shows the delegated plan kind, the exact engine
+statement, and safety/verification notes. Storage reclaim still flows through `expire`
+then `clean-orphans`; compact never deletes physical files directly. Native Arrow
+compaction remains later; `tune` and declarative policy (`iceops.yaml` + `iceops apply`)
+are available in the current development tree; a stateless HTTP API (`iceops serve`)
+comes later.
 
 ## Quickstart with a local demo lakehouse
 

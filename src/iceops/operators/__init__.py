@@ -1,3 +1,4 @@
+from .apply import apply
 from .clean_orphans import clean_orphans
 from .compact import compact
 from .cost import cost
@@ -16,4 +17,5 @@ __all__ = [
     "clean_orphans",
     "rewrite_manifests",
     "tune",
+    "apply",
 ]

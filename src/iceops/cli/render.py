@@ -9,11 +9,14 @@ from rich.table import Table as RichTable
 from rich.text import Text
 
 from ..models import (
+    ApplyPlan,
+    ApplyResult,
     CleanOrphansPlan,
     CleanOrphansResult,
     CompactPlan,
     CompactResult,
     CostReport,
+    EnginePlanContract,
     ExpirePlan,
     ExpireResult,
     Finding,
@@ -25,6 +28,7 @@ from ..models import (
     Status,
     TunePlan,
     TuneResult,
+    VerificationResult,
     human_bytes,
 )
 
@@ -163,23 +167,55 @@ def render_cost(report: CostReport) -> None:
         console.print(f"[dim]note: {note}[/dim]")
 
 
-def _render_engine_op(
-    label: str, identifier: str, engine: str, executed: object, show_footer: bool
-) -> None:
+def _render_contract(contract: EnginePlanContract | None) -> None:
+    if contract is None:
+        return
+    console.print(f"plan kind: {contract.plan_kind.value}")
+    console.print("\nstatement:")
+    console.print(f"  {contract.statement}")
+    if contract.safety_notes:
+        console.print("\nsafety:")
+        for note in contract.safety_notes:
+            console.print(f"  - {note}")
+    if contract.verification_notes:
+        console.print("\nverification:")
+        for note in contract.verification_notes:
+            console.print(f"  - {note}")
+
+
+def _render_verifications(verifications: list[VerificationResult]) -> None:
+    if not verifications:
+        return
+    console.print("\nverification:")
+    for check in verifications:
+        label = check.check.replace("_", " ")
+        text = f"  {label}: {check.status.value}"
+        if check.before is not None or check.after is not None:
+            text += f" ({check.before if check.before is not None else '?'} -> "
+            text += f"{check.after if check.after is not None else '?'})"
+        if check.note:
+            text += f" - {check.note}"
+        console.print(text)
+
+
+def _render_engine_op(label: str, plan: object, executed: object, show_footer: bool) -> None:
     """Uniform view for an engine-delegated fix op: the engine picks the work and applies
     its own safety; iceops shows the parameters and relays the outcome."""
+    identifier = getattr(plan, "identifier")
+    engine = getattr(plan, "engine")
     console.print(f"plan: {label} {identifier} via {engine}")
-    console.print(
-        f"[dim]{engine} selects the exact work and applies its own retention/reachability; "
-        f"iceops relays the result[/dim]"
-    )
+    _render_contract(getattr(plan, "engine_contract", None))
     if executed is None:
+        for warning in getattr(plan, "warnings", []) or []:
+            console.print(f"[yellow]warning: {warning}[/yellow]")
         if show_footer:
             console.print("[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
         return
     console.print(f"[green]{label} submitted to {engine}[/green]")
     for action_result in getattr(executed, "action_results", []) or []:
         for key, value in sorted(action_result.details.items()):
+            if key == "statement":
+                continue
             console.print(f"  {key}: {value}")
 
 
@@ -187,7 +223,7 @@ def render_expire_plan(
     plan: ExpirePlan, executed: ExpireResult | None = None, show_footer: bool = True
 ) -> None:
     if plan.engine is not None:
-        _render_engine_op("expire", plan.identifier, plan.engine, executed, show_footer)
+        _render_engine_op("expire", plan, executed, show_footer)
         return
     if not plan.candidates:
         console.print(
@@ -235,7 +271,7 @@ def render_rewrite_manifests_plan(
     show_footer: bool = True,
 ) -> None:
     if plan.engine is not None:
-        _render_engine_op("rewrite-manifests", plan.identifier, plan.engine, executed, show_footer)
+        _render_engine_op("rewrite-manifests", plan, executed, show_footer)
         return
     if not plan.actionable:
         console.print(
@@ -272,7 +308,7 @@ def render_clean_orphans_plan(
     show_footer: bool = True,
 ) -> None:
     if plan.engine is not None:
-        _render_engine_op("clean-orphans", plan.identifier, plan.engine, executed, show_footer)
+        _render_engine_op("clean-orphans", plan, executed, show_footer)
         return
     skipped_note = "  ".join(f"{k}: {v}" for k, v in plan.skipped.items()) if plan.skipped else ""
     if not plan.actionable:
@@ -333,8 +369,10 @@ def render_compact_plan(
 
     console.print(
         f"plan: compact {plan.small_file_count} small files in {plan.identifier} "
-        f"with {plan.engine} (target {human_bytes(plan.target_file_size_bytes)})"
+        f"via {plan.engine} (target {human_bytes(plan.target_file_size_bytes)})"
     )
+    if plan.engine_contract is not None:
+        console.print(f"plan kind: {plan.engine_contract.plan_kind.value}")
     if plan.delete_file_count:
         console.print(
             f"  {plan.delete_file_count} delete files present — the engine owns "
@@ -344,10 +382,22 @@ def render_compact_plan(
         f"  engine catalog: {plan.engine_catalog or '?'} · snapshot: "
         f"{plan.current_snapshot_id or '?'}"
     )
-    console.print(
-        "[dim]engine dry-run is an estimate: Spark/Trino choose the exact rewrite "
-        "files internally; storage reclaim still requires expire then clean-orphans[/dim]"
-    )
+    if plan.engine_contract is not None:
+        console.print("\nstatement:")
+        console.print(f"  {plan.engine_contract.statement}")
+    console.print("\nestimated work:")
+    console.print(f"  data files: {plan.data_file_count}")
+    console.print(f"  small files: {plan.small_file_count}")
+    console.print(f"  delete files: {plan.delete_file_count}")
+    console.print(f"  data bytes: {human_bytes(plan.total_data_bytes)}")
+    if plan.engine_contract is not None and plan.engine_contract.safety_notes:
+        console.print("\nsafety:")
+        for note in plan.engine_contract.safety_notes:
+            console.print(f"  - {note}")
+    if plan.engine_contract is not None and plan.engine_contract.verification_notes:
+        console.print("\nverification:")
+        for note in plan.engine_contract.verification_notes:
+            console.print(f"  - {note}")
     for warning in plan.warnings:
         console.print(f"[yellow]warning: {warning}[/yellow]")
 
@@ -362,9 +412,25 @@ def render_compact_plan(
         f"{executed.data_files_after if executed.data_files_after is not None else '?'} "
         "data files[/green]"
     )
+    console.print("\neffect:")
+    console.print(
+        f"  data files: {executed.data_files_before} -> "
+        f"{executed.data_files_after if executed.data_files_after is not None else '?'}"
+    )
+    console.print(
+        f"  delete files: {executed.delete_files_before} -> "
+        f"{executed.delete_files_after if executed.delete_files_after is not None else '?'}"
+    )
+    console.print(
+        f"  snapshot: {executed.snapshot_before or '?'} -> {executed.snapshot_after or '?'}"
+    )
     for result in executed.action_results:
+        console.print("\nengine result:")
         for key, value in sorted(result.details.items()):
+            if key == "statement":
+                continue
             console.print(f"  {key}: {value}")
+    _render_verifications(executed.verifications)
 
 
 def _utcnow():
@@ -429,6 +495,45 @@ def _render_sub(step: str, sub_plan: object, sub_result: object) -> None:
         render_expire_plan(sub_plan, executed=sub_result, show_footer=False)  # type: ignore[arg-type]
     elif step == "clean_orphans":
         render_clean_orphans_plan(sub_plan, executed=sub_result, show_footer=False)  # type: ignore[arg-type]
+
+
+def render_apply(plan: ApplyPlan, executed: ApplyResult | None = None) -> None:
+    results = {r.identifier: r for r in executed.results} if executed else {}
+    if not plan.tables and not plan.skipped:
+        console.print(f"no tables in scope of the policy for catalog '{plan.catalog}'")
+        return
+
+    console.print(f"policy over catalog '{plan.catalog}' — {len(plan.tables)} tables in scope")
+    for table in plan.tables:
+        eng = f" [{table.engine}]" if table.engine else ""
+        console.print(f"\n[bold]{table.identifier}[/bold]{eng}")
+        tr = results.get(table.identifier)
+        for d in table.decisions:
+            label = _TUNE_STEP_LABELS.get(d.op, d.op)
+            if d.will_run:
+                done = tr and d.op in tr.executed
+                mark = "[green]✓ ran[/green]" if done else "[bold]will run[/bold]"
+                console.print(f"  {mark} {label}  [dim]({d.reason})[/dim]")
+            else:
+                console.print(f"  [dim]skip {label} ({d.reason})[/dim]")
+        if tr and tr.halted_at:
+            console.print(
+                f"  [red]halted at {_TUNE_STEP_LABELS.get(tr.halted_at, tr.halted_at)}: "
+                f"{tr.error}[/red]"
+            )
+    for identifier, reason in plan.skipped.items():
+        console.print(f"[dim]· {identifier}: {reason}[/dim]")
+
+    if executed is None:
+        if plan.actionable:
+            console.print("\n[bold]DRY RUN — nothing changed. Add --yes to execute.[/bold]")
+        else:
+            console.print("\n[green]nothing to apply.[/green]")
+    elif isinstance(executed, ApplyResult):
+        ran = sum(len(r.executed) for r in executed.results)
+        console.print(
+            f"\n[green]applied: {ran} operations across {len(plan.tables)} tables[/green]"
+        )
 
 
 def render_catalogs(profiles: dict[str, dict[str, Any]]) -> None:

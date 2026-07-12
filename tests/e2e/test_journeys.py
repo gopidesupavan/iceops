@@ -459,6 +459,67 @@ class TestEngineFlagJourney:
 
 
 @pytest.fixture(scope="module")
+def policy_workspace(tmp_path_factory):
+    workspace, catalog = make_workspace(tmp_path_factory, "policy")
+    events = catalog.create_table("db.events", schema=batch(1).schema)
+    for i in range(12):  # fragmented
+        events.append(batch(i * 300))
+    keep = catalog.create_table("db.keep", schema=batch(1).schema)
+    for i in range(6):
+        keep.append(batch(i * 300))
+    (workspace / "iceops.yaml").write_text(
+        "catalog: e2e\n"
+        "defaults:\n"
+        '  rewrite-manifests: {when: "manifest-count > 5"}\n'
+        "  expire-snapshots: {retain-last: 2, older-than: 0s}\n"
+        "  clean-orphans: {older-than: 0s}\n"
+        "tables:\n"
+        "  db.keep: {disabled: true}\n"
+    )
+    return workspace
+
+
+class TestPolicyApplyJourney:
+    """iceops apply through the real binary with --yes — maintenance as code, real effect."""
+
+    @pytest.fixture()
+    def workspace(self, policy_workspace):
+        return policy_workspace
+
+    def _catalog(self, workspace):
+        wh = workspace / "warehouse"
+        return load_catalog(
+            "e2e", type="sql", uri=f"sqlite:///{wh}/catalog.db", warehouse=f"file://{wh}"
+        )
+
+    def test_01_dry_run_shows_per_table_plan(self, workspace):
+        r = iceops("apply", "--catalog", "e2e", cwd=workspace)  # finds ./iceops.yaml
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "will run" in r.stdout and "manifest-count 12 > 5" in r.stdout
+        assert "db.keep: disabled by policy" in r.stdout
+
+    def test_02_apply_yes_converges_and_respects_disabled(self, workspace):
+        keep_before = self._catalog(workspace).load_table("db.keep").inspect.manifests().num_rows
+        r = iceops("apply", "--catalog", "e2e", "--yes", cwd=workspace)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "applied:" in r.stdout
+
+        cat = self._catalog(workspace)
+        assert cat.load_table("db.events").inspect.manifests().num_rows == 1  # converged
+        assert cat.load_table("db.events").scan().to_arrow().num_rows == 3600  # intact
+        # disabled table completely untouched
+        assert cat.load_table("db.keep").inspect.manifests().num_rows == keep_before
+
+    def test_03_bad_metric_in_policy_exits_2(self, workspace):
+        (workspace / "bad.yaml").write_text(
+            'catalog: e2e\ndefaults:\n  compact: {when: "not-a-metric > 1"}\n'
+        )
+        r = iceops("apply", "--policy", "bad.yaml", "--catalog", "e2e", cwd=workspace)
+        assert r.returncode == 2
+        assert "unknown metric" in r.stderr.lower()
+
+
+@pytest.fixture(scope="module")
 def safety_workspace(tmp_path_factory):
     workspace, catalog = make_workspace(tmp_path_factory, "safety")
     table = catalog.create_table("db.managed", schema=batch(1).schema)

@@ -36,6 +36,9 @@ def test_expire_engine_dry_run_builds_engine_plan(seeded_catalog):
     assert plan.engine == "spark"
     assert plan.candidates == []  # delegated — no native enumeration
     assert plan.actionable  # snapshots exist
+    assert plan.action is not None
+    assert plan.engine_contract is not None
+    assert "expire_snapshots" in plan.engine_contract.statement
 
 
 def test_rewrite_engine_dry_run_builds_engine_plan(seeded_catalog):
@@ -45,6 +48,9 @@ def test_rewrite_engine_dry_run_builds_engine_plan(seeded_catalog):
     assert plan.engine == "trino"
     assert plan.manifest_count == 5
     assert plan.actionable
+    assert plan.action is not None
+    assert plan.engine_contract is not None
+    assert "optimize_manifests" in plan.engine_contract.statement
 
 
 def test_clean_engine_dry_run_skips_native_listing(seeded_catalog):
@@ -55,12 +61,19 @@ def test_clean_engine_dry_run_skips_native_listing(seeded_catalog):
     assert plan.candidates == []  # no native storage listing in engine mode
     assert plan.listed_count == 0
     assert plan.actionable
+    assert plan.action is not None
+    assert plan.engine_contract is not None
+    assert "remove_orphan_files" in plan.engine_contract.statement
 
 
-def test_engine_execute_without_catalog_fails_clearly(seeded_catalog):
+def test_engine_catalog_is_inferred_for_dry_run(seeded_catalog):
     _table(seeded_catalog, "db.engnocat")
-    with pytest.raises(IceopsError, match="engine-catalog"):
-        expire(seeded_catalog, "db.engnocat", engine="spark", engine_catalog=None, execute=True)
+    plan = expire(seeded_catalog, "db.engnocat", engine="spark", engine_catalog=None)
+    assert isinstance(plan, ExpirePlan)
+    assert plan.action is not None
+    assert plan.action.params["engine_catalog"] == "test"
+    assert plan.engine_contract is not None
+    assert "`test`.system.expire_snapshots" in plan.engine_contract.statement
 
 
 def test_unknown_engine_rejected(seeded_catalog):

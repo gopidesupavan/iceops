@@ -38,6 +38,20 @@ class Status(str, Enum):
     CRITICAL = "critical"
 
 
+class PlanKind(str, Enum):
+    """Whether iceops selected exact work or delegated selection to an engine."""
+
+    EXACT = "exact"
+    DELEGATED = "delegated"
+
+
+class VerificationStatus(str, Enum):
+    PLANNED = "planned"
+    PASSED = "passed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
 class TableMetrics(BaseModel):
     identifier: str
     location: Optional[str] = None
@@ -148,6 +162,8 @@ class ExpirePlan(BaseModel):
     unreferenced_data_bytes: Optional[int] = None
     unreferenced_manifest_bytes: Optional[int] = None
     engine: Optional[str] = None  # None = native; set = delegated to spark/trino
+    action: Optional["Action"] = None
+    engine_contract: Optional["EnginePlanContract"] = None
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
@@ -176,6 +192,8 @@ class RewriteManifestsPlan(BaseModel):
     estimated_after: int = 0
     target_manifest_size_bytes: int = 0
     engine: Optional[str] = None  # None = native; set = delegated to spark/trino
+    action: Optional["Action"] = None
+    engine_contract: Optional["EnginePlanContract"] = None
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
@@ -213,6 +231,8 @@ class CleanOrphansPlan(BaseModel):
     skipped: dict[str, int] = Field(default_factory=dict)  # young/excluded/metadata-json
     older_than_days: float = 3.0
     engine: Optional[str] = None  # None = native; set = delegated to spark/trino
+    action: Optional["Action"] = None
+    engine_contract: Optional["EnginePlanContract"] = None
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
@@ -233,6 +253,24 @@ class CleanOrphansResult(BaseModel):
     spared: list[str] = Field(default_factory=list)  # re-check found them referenced
     action_results: list["ActionResult"] = Field(default_factory=list)
     status: str = "cleaned"  # cleaned | nothing-to-do
+
+
+class EnginePlanContract(BaseModel):
+    engine: str
+    plan_kind: PlanKind = PlanKind.DELEGATED
+    statement: str
+    owns: list[str] = Field(default_factory=list)
+    iceops_owns: list[str] = Field(default_factory=list)
+    safety_notes: list[str] = Field(default_factory=list)
+    verification_notes: list[str] = Field(default_factory=list)
+
+
+class VerificationResult(BaseModel):
+    check: str
+    status: VerificationStatus
+    before: Optional[int] = None
+    after: Optional[int] = None
+    note: Optional[str] = None
 
 
 class Action(BaseModel):
@@ -265,6 +303,7 @@ class CompactPlan(BaseModel):
     total_data_bytes: int = 0
     current_snapshot_id: Optional[int] = None
     action: Optional[Action] = None
+    engine_contract: Optional[EnginePlanContract] = None
     warnings: list[str] = Field(default_factory=list)
     generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
@@ -282,7 +321,48 @@ class CompactResult(BaseModel):
     delete_files_after: Optional[int] = None
     snapshot_before: Optional[int] = None
     snapshot_after: Optional[int] = None
+    verifications: list[VerificationResult] = Field(default_factory=list)
     status: str = "compacted"  # compacted | nothing-to-do
+
+
+class OpDecision(BaseModel):
+    op: str
+    will_run: bool
+    reason: str  # why it runs or is skipped (e.g. "small-file-ratio 0.12 <= 0.3")
+
+
+class TableApplyPlan(BaseModel):
+    identifier: str
+    engine: Optional[str] = None
+    decisions: list[OpDecision] = Field(default_factory=list)
+
+    @property
+    def actionable(self) -> bool:
+        return any(d.will_run for d in self.decisions)
+
+
+class ApplyPlan(BaseModel):
+    catalog: str
+    tables: list[TableApplyPlan] = Field(default_factory=list)
+    skipped: dict[str, str] = Field(default_factory=dict)  # identifier -> reason
+    generated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+
+    @property
+    def actionable(self) -> bool:
+        return any(t.actionable for t in self.tables)
+
+
+class TableApplyResult(BaseModel):
+    identifier: str
+    executed: list[str] = Field(default_factory=list)
+    halted_at: Optional[str] = None
+    error: Optional[str] = None
+
+
+class ApplyResult(BaseModel):
+    plan: ApplyPlan
+    results: list[TableApplyResult] = Field(default_factory=list)
+    status: str = "applied"  # applied | nothing-to-do
 
 
 class TunePlan(BaseModel):

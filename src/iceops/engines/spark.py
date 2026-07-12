@@ -141,10 +141,11 @@ class SparkEngine:
                 builder = SPARK_SQL_BUILDERS.get(action.op)
                 if builder is None:
                     raise IceopsError(f"spark engine cannot execute '{action.op}'")
-                rows = session.sql(builder(action)).collect()
-                results.append(
-                    ActionResult(action=action, status="submitted", details=parse_engine_rows(rows))
-                )
+                statement = builder(action)
+                rows = session.sql(statement).collect()
+                details = parse_engine_rows(rows)
+                details.setdefault("statement", statement)
+                results.append(ActionResult(action=action, status="submitted", details=details))
         finally:
             if previous_tz is not None:
                 session.conf.set("spark.sql.session.timeZone", previous_tz)

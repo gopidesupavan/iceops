@@ -131,9 +131,26 @@ in case a writer committed mid-run.
 
 ```console
 $ iceops compact db.events --catalog demo --engine spark --target-file-size 512MB
-plan: compact 60 small files in db.events with spark (target 512.0MB)
+plan: compact 60 small files in db.events via spark (target 512.0MB)
+plan kind: delegated
   engine catalog: demo · snapshot: 7402711359425541986
-engine dry-run is an estimate: Spark/Trino choose the exact rewrite files internally
+
+statement:
+  CALL `demo`.system.rewrite_data_files(table => 'demo.db.events', options => map(...))
+
+estimated work:
+  data files: 60
+  small files: 60
+  delete files: 0
+
+safety:
+  - spark chooses the exact files to rewrite.
+  - iceops does not delete physical files during compact.
+  - old files remain until expire runs, then become clean-orphans candidates.
+
+verification:
+  - row-count verification runs after execution when snapshot metadata exposes total-records
+
 DRY RUN — nothing changed. Add --yes to execute.
 ```
 
@@ -141,8 +158,8 @@ DRY RUN — nothing changed. Add --yes to execute.
 compaction is not yet available). iceops plans and submits one engine action; Spark runs
 Iceberg `rewrite_data_files`, Trino runs `ALTER TABLE … EXECUTE optimize`. Because
 compaction rewrites data, iceops verifies the engine preserved every row (via snapshot
-`total-records`) and refuses the result otherwise — the pre-compaction snapshot stays
-intact for rollback.
+`total-records`) when that metadata is available, reports `passed` or `skipped`, and
+refuses any mismatch — the pre-compaction snapshot stays intact for rollback.
 
 Both engines are verified against the real thing (no mocks): Spark via a local JVM, Trino
 via a REST catalog + MinIO + Trino container stack. Run the gated labs with
@@ -219,6 +236,37 @@ If a step fails, tune stops there and never runs later steps on an unexpected st
 
 Options: `--engine spark|trino`, `--engine-catalog`, `--older-than 7d` (expire window),
 `--yes`, `--force`, `--json`.
+
+## iceops apply — per-table maintenance as code
+
+```console
+$ iceops apply --policy iceops.yaml
+policy over catalog 'prod' — 2 tables in scope
+
+db.events [spark]
+  will run rewrite-manifests  (manifest-count 60 > 50)
+  skip compact (small-file-ratio 0.12 <= 0.3)
+  will run expire  (no condition)
+· db.audit: disabled by policy
+
+DRY RUN — nothing changed. Add --yes to execute.
+```
+
+Runs a checked-in `iceops.yaml` across a catalog — the "maintenance as code" path. Policy
+is **per table**: `defaults` apply to every table, and `tables` entries (glob → overrides)
+tune individual tables, merging field-by-field so a table that sets only `retain-last`
+keeps the default `older-than`. `disabled: true` skips a table entirely; `engine` can be
+set globally or per table. Each op runs only if its section is present AND its `when:`
+condition passes — the dry-run shows the reason for every decision.
+
+apply composes the four fix operators in the safe order (compact → rewrite-manifests →
+expire → clean-orphans); it never adds new behavior. Dry-run lists **every table in
+scope** so you see the full blast radius before `--yes`. Check the policy into git, review
+it as a PR, run `iceops apply --yes` from cron / Airflow / a GitHub Action.
+
+See [examples/iceops.yaml](../examples/iceops.yaml) for a full annotated policy and the
+list of metrics usable in `when:`. Options: `--policy iceops.yaml`, `--catalog`, `--yes`,
+`--force`, `--json`.
 
 ## iceops catalogs / iceops version
 

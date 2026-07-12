@@ -7,7 +7,14 @@ from ..models import Action, ActionResult, Plan
 from .base import Engine
 from .native import NativeEngine
 
-__all__ = ["Engine", "get_engine", "submit", "validate_engine", "SUPPORTED_ENGINES"]
+__all__ = [
+    "Engine",
+    "build_statement",
+    "get_engine",
+    "submit",
+    "validate_engine",
+    "SUPPORTED_ENGINES",
+]
 
 SUPPORTED_ENGINES = ("spark", "trino")
 
@@ -31,6 +38,22 @@ def get_engine(name: str = "native", **config: Any) -> Engine:
 
         return TrinoEngine(**config)
     raise IceopsError(f"unknown engine '{name}' (expected native, spark, or trino)")
+
+
+def build_statement(engine: str, action: Action) -> str:
+    """Render the exact SQL/procedure statement for an engine action."""
+    validate_engine(engine)
+    if engine == "spark":
+        from .spark import SPARK_SQL_BUILDERS
+
+        builder = SPARK_SQL_BUILDERS.get(action.op)
+    else:
+        from .trino import TRINO_SQL_BUILDERS
+
+        builder = TRINO_SQL_BUILDERS.get(action.op)
+    if builder is None:
+        raise IceopsError(f"{engine} engine cannot execute '{action.op}'")
+    return builder(action)
 
 
 def submit(

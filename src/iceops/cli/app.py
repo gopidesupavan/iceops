@@ -26,6 +26,7 @@ from ..catalog import connect
 from ..config import default_catalog_name, load_engine_config, load_profiles
 from ..errors import IceopsError
 from ..models import (
+    ApplyResult,
     CleanOrphansResult,
     CompactResult,
     ExpireResult,
@@ -424,6 +425,61 @@ def tune(
         render.render_tune(plan, executed=result)
     if result is not None and result.status == "halted":
         raise typer.Exit(EXIT_ERROR)
+    if not yes and plan.actionable:
+        raise typer.Exit(EXIT_FINDINGS)
+
+
+@app.command()
+def apply(
+    policy: str = typer.Option("iceops.yaml", "--policy", help="path to the policy file"),
+    catalog: Optional[str] = CatalogOpt,
+    yes: bool = typer.Option(False, "--yes", help="execute; without this it's a dry run"),
+    force: bool = typer.Option(
+        False, "--force", help="proceed even on tables another optimizer manages"
+    ),
+    json_output: bool = JsonOpt,
+) -> None:
+    """Run a per-table iceops.yaml policy across a catalog (dry-run by default).
+
+    Each table's policy decides which operators run and with what settings; `when:`
+    conditions gate each op against the table's metrics. Maintenance-as-code: check the
+    policy into git, run this from cron/Airflow/CI.
+    """
+    from pathlib import Path as _Path
+
+    from ..policy import load_policy, validate_policy
+
+    policy_path = _Path(policy)
+    if not policy_path.is_file():
+        raise _fail(f"policy file not found: {policy} (pass --policy PATH)")
+    try:
+        doc = load_policy(policy_path)
+        validate_policy(doc)  # parse every when: now, so a typo fails here not mid-run
+    except (IceopsError, Exception) as exc:  # noqa: BLE001 - surface any load/parse error
+        raise _fail(f"invalid policy: {exc}")
+
+    name = catalog or doc.catalog
+    if not name:
+        raise _fail("no catalog: set 'catalog:' in the policy or pass --catalog")
+
+    try:
+        outcome = operators.apply(
+            connect(name),
+            doc,
+            name,
+            engine_config=load_engine_config(doc.engine) if doc.engine else None,
+            execute=yes,
+            force=force,
+        )
+    except IceopsError as exc:
+        raise _fail(str(exc))
+
+    plan = outcome.plan if isinstance(outcome, ApplyResult) else outcome
+    result = outcome if isinstance(outcome, ApplyResult) else None
+    if json_output:
+        print(outcome.model_dump_json(indent=2))
+    else:
+        render.render_apply(plan, executed=result)
     if not yes and plan.actionable:
         raise typer.Exit(EXIT_FINDINGS)
 

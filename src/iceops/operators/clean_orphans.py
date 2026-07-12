@@ -46,7 +46,8 @@ from urllib.parse import unquote, urlparse
 
 from ..catalog.detect import managed_by
 from ..errors import IceopsError, TableNotFoundError
-from ..models import CleanOrphansPlan, CleanOrphansResult, OrphanFile
+from ..models import Action, CleanOrphansPlan, CleanOrphansResult, OrphanFile, Plan
+from ._engine_contract import catalog_name_from_table, delegated_contract
 
 if TYPE_CHECKING:
     from pyiceberg.catalog import Catalog
@@ -155,14 +156,51 @@ def _clean_via_engine(
     battle-tested for object-store listing at scale). We deliberately DO NOT run our own
     storage listing here — that expensive step is exactly what we're delegating. The
     engine applies its own retention window and reachability."""
-    from ..engines import submit
+    from ..engines import get_engine
 
+    engine_catalog = engine_catalog or catalog_name_from_table(table)
+    action = Action(
+        op="clean_orphans",
+        table=identifier,
+        params={
+            "engine_catalog": engine_catalog,
+            "table": identifier,
+            "older_than_seconds": int(older_than.total_seconds()),
+        },
+    )
     plan = CleanOrphansPlan(
         identifier=identifier,
         location=table.location(),
         older_than_days=older_than.total_seconds() / 86400,
         engine=engine,
+        action=action,
     )
+    if engine_catalog:
+        plan.engine_contract = delegated_contract(
+            engine,
+            action,
+            owns=[
+                "storage listing",
+                "reachability check",
+                "retention enforcement",
+                "physical file deletion",
+            ],
+            iceops_owns=[
+                "table load and managed-table refusal",
+                "older-than parameter",
+                "engine statement construction",
+                "engine result relay",
+            ],
+            safety_notes=[
+                f"{engine} chooses the exact orphan candidates.",
+                "iceops does not enumerate candidate files in engine mode.",
+                "engine clean-orphans applies the engine's own retention and reachability semantics.",
+            ],
+        )
+    else:
+        plan.warnings.append(
+            "engine catalog is unknown; pass --engine-catalog so the engine can find the table"
+        )
     if not execute:
         return plan
     if not engine_catalog:
@@ -170,16 +208,8 @@ def _clean_via_engine(
             "engine clean-orphans needs --engine-catalog so the engine finds the table"
         )
 
-    results = submit(
-        engine,
-        "clean_orphans",
-        identifier,
-        {
-            "engine_catalog": engine_catalog,
-            "table": identifier,
-            "older_than_seconds": int(older_than.total_seconds()),
-        },
-        engine_config,
+    results = get_engine(engine, **(engine_config or {})).execute(
+        Plan(table=identifier, actions=[action])
     )
     return CleanOrphansResult(plan=plan, action_results=results)
 

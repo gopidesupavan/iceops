@@ -91,11 +91,12 @@ class TrinoEngine:
             if builder is None:
                 raise IceopsError(f"trino engine cannot execute '{action.op}'")
             cursor = connection.cursor()
-            cursor.execute(builder(action))
+            statement = builder(action)
+            cursor.execute(statement)
             rows = cursor.fetchall()
-            results.append(
-                ActionResult(action=action, status="submitted", details=parse_engine_rows(rows))
-            )
+            details = parse_engine_rows(rows)
+            details.setdefault("statement", statement)
+            results.append(ActionResult(action=action, status="submitted", details=details))
         return results
 
     def _connect(self) -> Any:

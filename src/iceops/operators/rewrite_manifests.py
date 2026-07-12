@@ -45,9 +45,10 @@ import math
 from typing import TYPE_CHECKING, Optional
 
 from ..catalog.detect import managed_by
-from ..engines import submit, validate_engine
+from ..engines import get_engine, validate_engine
 from ..errors import IceopsError, TableNotFoundError
-from ..models import RewriteManifestsPlan, RewriteManifestsResult
+from ..models import Action, Plan, RewriteManifestsPlan, RewriteManifestsResult
+from ._engine_contract import catalog_name_from_table, delegated_contract
 
 if TYPE_CHECKING:
     from pyiceberg.table import Table
@@ -112,24 +113,51 @@ def _rewrite_via_engine(
 ) -> RewriteManifestsPlan | RewriteManifestsResult:
     """Delegate manifest rewriting to the engine (Spark rewrite_manifests / Trino
     optimize_manifests). The engine chooses the grouping; iceops reports before/after."""
+    engine_catalog = engine_catalog or catalog_name_from_table(table)
     before = table.inspect.manifests().num_rows if table.current_snapshot() else 0
+    action = Action(
+        op="rewrite_manifests",
+        table=identifier,
+        params={"engine_catalog": engine_catalog, "table": identifier},
+        estimated={"manifest_count": before},
+    )
     plan = RewriteManifestsPlan(
         identifier=identifier,
         manifest_count=before,
         target_manifest_size_bytes=target_manifest_size,
         engine=engine,
+        action=action,
     )
+    if engine_catalog:
+        plan.engine_contract = delegated_contract(
+            engine,
+            action,
+            owns=[
+                "manifest grouping",
+                "manifest rewrite commit",
+            ],
+            iceops_owns=[
+                "table load and managed-table refusal",
+                "before/after manifest count reporting",
+                "engine statement construction",
+            ],
+            safety_notes=[
+                f"{engine} chooses the exact manifest grouping.",
+                "iceops does not delete physical files during manifest rewrite.",
+                "the previous snapshot remains available for rollback until expiry.",
+            ],
+        )
+    else:
+        plan.warnings.append(
+            "engine catalog is unknown; pass --engine-catalog so the engine can find the table"
+        )
     if not execute:
         return plan
     if not engine_catalog:
         raise IceopsError("engine rewrite needs --engine-catalog so the engine finds the table")
 
-    results = submit(
-        engine,
-        "rewrite_manifests",
-        identifier,
-        {"engine_catalog": engine_catalog, "table": identifier},
-        engine_config,
+    results = get_engine(engine, **(engine_config or {})).execute(
+        Plan(table=identifier, actions=[action])
     )
     table.refresh()
     current = table.current_snapshot()

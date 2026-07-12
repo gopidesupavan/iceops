@@ -35,6 +35,9 @@ def test_dry_run_plans_small_files_without_an_engine(seeded_catalog):
     assert plan.small_file_count == 5  # all tiny appends are well under 75% of target
     assert plan.actionable
     assert plan.action is not None and plan.action.op == "compact"
+    assert plan.engine_contract is not None
+    assert plan.engine_contract.plan_kind == "delegated"
+    assert "rewrite_data_files" in plan.engine_contract.statement
     # dry run resolves the engine catalog from the table's catalog
     assert plan.engine_catalog == "test"
 

@@ -12,7 +12,15 @@ from typing import TYPE_CHECKING, Any
 from ..catalog.detect import managed_by
 from ..engines import get_engine
 from ..errors import IceopsError, TableNotFoundError
-from ..models import Action, CompactPlan, CompactResult, Plan
+from ..models import (
+    Action,
+    CompactPlan,
+    CompactResult,
+    Plan,
+    VerificationResult,
+    VerificationStatus,
+)
+from ._engine_contract import delegated_contract
 
 if TYPE_CHECKING:
     from pyiceberg.catalog import Catalog
@@ -121,6 +129,29 @@ def _build_plan(
                 "total_data_bytes": plan.total_data_bytes,
             },
         )
+        plan.engine_contract = delegated_contract(
+            engine,
+            plan.action,
+            owns=[
+                "exact data-file selection",
+                "data rewrite commit",
+                "delete-file rewrite semantics",
+            ],
+            iceops_owns=[
+                "table load and managed-table refusal",
+                "small-file estimate",
+                "statement construction",
+                "post-run metadata refresh",
+            ],
+            safety_notes=[
+                f"{engine} chooses the exact files to rewrite.",
+                "iceops does not delete physical files during compact.",
+                "old files remain until expire runs, then become clean-orphans candidates.",
+            ],
+            verification_notes=[
+                "row-count verification runs after execution when snapshot metadata exposes total-records"
+            ],
+        )
     return plan
 
 
@@ -134,15 +165,28 @@ def verify_row_count(
     before: int | None,
     after: int | None,
     snapshot_id: int | None,
-) -> None:
-    """Raise if compaction changed the row count. Skips silently when either count is
-    unknown (older metadata) — a missing signal must not fabricate a failure."""
-    if before is not None and after is not None and before != after:
+) -> VerificationResult:
+    """Return the row-count verification result, raising on unsafe mismatch."""
+    if before is None or after is None:
+        return VerificationResult(
+            check="row_count",
+            status=VerificationStatus.SKIPPED,
+            before=before,
+            after=after,
+            note="snapshot metadata did not expose total-records before and after compaction",
+        )
+    if before != after:
         raise IceopsError(
             f"compaction changed the row count of '{identifier}' ({before} -> {after}) "
             f"— the engine's rewrite is unsafe. The pre-compaction snapshot {snapshot_id} "
             f"is intact; roll back via table.manage_snapshots().rollback_to_snapshot()."
         )
+    return VerificationResult(
+        check="row_count",
+        status=VerificationStatus.PASSED,
+        before=before,
+        after=after,
+    )
 
 
 def _total_records(table: "Table") -> int | None:
@@ -179,7 +223,9 @@ def _execute(table: "Table", plan: CompactPlan, engine_config: dict[str, Any]) -
     )
     table.refresh()
 
-    verify_row_count(plan.identifier, rows_before, _total_records(table), plan.current_snapshot_id)
+    verification = verify_row_count(
+        plan.identifier, rows_before, _total_records(table), plan.current_snapshot_id
+    )
 
     after = _build_plan(
         table,
@@ -197,5 +243,6 @@ def _execute(table: "Table", plan: CompactPlan, engine_config: dict[str, Any]) -
         delete_files_after=after.delete_file_count,
         snapshot_before=plan.current_snapshot_id,
         snapshot_after=after.current_snapshot_id,
+        verifications=[verification],
         status="compacted",
     )

@@ -40,9 +40,10 @@ import datetime as dt
 from typing import TYPE_CHECKING, Optional
 
 from ..catalog.detect import STREAMING_SNAPSHOTS_PER_DAY, managed_by
-from ..engines import submit, validate_engine
+from ..engines import get_engine, validate_engine
 from ..errors import IceopsError, TableNotFoundError
-from ..models import ExpireCandidate, ExpirePlan, ExpireResult
+from ..models import Action, ExpireCandidate, ExpirePlan, ExpireResult, Plan
+from ._engine_contract import catalog_name_from_table, delegated_contract
 
 if TYPE_CHECKING:
     from pyiceberg.catalog import Catalog
@@ -127,31 +128,59 @@ def _expire_via_engine(
     """Delegate expiry to the engine's expire_snapshots procedure. The engine selects
     which snapshots to drop (and deletes their files); iceops passes retain_last +
     older_than and reports before/after counts."""
+    engine_catalog = engine_catalog or catalog_name_from_table(table)
     snapshots = table.metadata.snapshots or []
     cutoff = dt.datetime.now(dt.timezone.utc) - older_than
+    action = Action(
+        op="expire",
+        table=identifier,
+        params={
+            "engine_catalog": engine_catalog,
+            "table": identifier,
+            "retain_last": retain_last,
+            "older_than_seconds": int(older_than.total_seconds()),
+        },
+        estimated={"snapshot_count": len(snapshots)},
+    )
     plan = ExpirePlan(
         identifier=identifier,
         retain_last=retain_last,
         cutoff=cutoff,
         snapshot_count=len(snapshots),
         engine=engine,
+        action=action,
     )
+    if engine_catalog:
+        plan.engine_contract = delegated_contract(
+            engine,
+            action,
+            owns=[
+                "snapshot selection",
+                "engine retention rules",
+                "physical file cleanup semantics",
+            ],
+            iceops_owns=[
+                "table load and managed-table refusal",
+                "retain-last and older-than parameters",
+                "before/after snapshot count reporting",
+            ],
+            safety_notes=[
+                f"{engine} selects the exact snapshots to expire.",
+                "engine expiry may delete physical files according to engine/catalog rules.",
+                "native iceops expire remains metadata-only; this delegated path uses engine semantics.",
+            ],
+        )
+    else:
+        plan.warnings.append(
+            "engine catalog is unknown; pass --engine-catalog so the engine can find the table"
+        )
     if not execute:
         return plan
     if not engine_catalog:
         raise IceopsError("engine expiry needs --engine-catalog so the engine finds the table")
 
-    results = submit(
-        engine,
-        "expire",
-        identifier,
-        {
-            "engine_catalog": engine_catalog,
-            "table": identifier,
-            "retain_last": retain_last,
-            "older_than_seconds": int(older_than.total_seconds()),
-        },
-        engine_config,
+    results = get_engine(engine, **(engine_config or {})).execute(
+        Plan(table=identifier, actions=[action])
     )
     table.refresh()
     return ExpireResult(

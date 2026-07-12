@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from iceops.engines import build_statement
 from iceops.engines.spark import (
     build_spark_clean_orphans_sql,
     build_spark_compact_sql,
@@ -16,7 +17,7 @@ from iceops.engines.trino import (
     build_trino_rewrite_manifests_sql,
 )
 from iceops.errors import IceopsError
-from iceops.models import Action, CompactPlan
+from iceops.models import Action, CompactPlan, VerificationStatus
 from iceops.operators import compact
 from iceops.operators.compact import verify_row_count
 
@@ -71,12 +72,21 @@ class TestRowCountVerification:
             verify_row_count("db.events", 9000, 8999, snapshot_id=42)
 
     def test_equal_counts_pass(self):
-        verify_row_count("db.events", 9000, 9000, snapshot_id=42)  # no raise
+        result = verify_row_count("db.events", 9000, 9000, snapshot_id=42)
+        assert result.status == VerificationStatus.PASSED
+        assert result.before == 9000
+        assert result.after == 9000
 
-    def test_unknown_count_skips_silently(self):
+    def test_unknown_count_returns_skipped_result(self):
         # a missing signal must never fabricate a failure
-        verify_row_count("db.events", None, 9000, snapshot_id=42)
-        verify_row_count("db.events", 9000, None, snapshot_id=42)
+        assert (
+            verify_row_count("db.events", None, 9000, snapshot_id=42).status
+            == VerificationStatus.SKIPPED
+        )
+        assert (
+            verify_row_count("db.events", 9000, None, snapshot_id=42).status
+            == VerificationStatus.SKIPPED
+        )
 
 
 class TestEngineValidationIsFailFast:
@@ -110,6 +120,11 @@ def test_spark_compact_sql_uses_iceberg_rewrite_data_files_procedure():
         "table => 'demo.db.events', "
         "options => map('target-file-size-bytes', '134217728', 'min-input-files', '2'))"
     )
+
+
+def test_build_statement_uses_the_engine_sql_builder():
+    assert build_statement("spark", _action()) == build_spark_compact_sql(_action())
+    assert build_statement("trino", _action()) == build_trino_compact_sql(_action())
 
 
 def test_spark_compact_sql_escapes_catalog_and_table_strings():
