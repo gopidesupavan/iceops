@@ -25,7 +25,7 @@ def snapshot_bloat(m: TableMetrics) -> Optional[Finding]:
         check_id="snapshot-bloat",
         severity=severity,
         message="; ".join(reasons),
-        recommendation="expire old snapshots (iceops expire, v0.2); every retained snapshot "
+        recommendation="expire old snapshots (iceops expire); every retained snapshot "
         "keeps its data files alive and grows metadata",
         data={
             "snapshot_count": m.snapshot_count,

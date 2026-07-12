@@ -27,7 +27,7 @@ def manifest_fragmentation(m: TableMetrics) -> Optional[Finding]:
             f"{m.manifest_count} manifest files averaging "
             f"{files_per_manifest:.0f} data files each — query planning reads every one"
         ),
-        recommendation="rewrite manifests (iceops v0.2) to consolidate; planning overhead "
+        recommendation="rewrite manifests (iceops rewrite-manifests) to consolidate; planning overhead "
         "grows linearly with manifest count",
         data={
             "manifest_count": m.manifest_count,

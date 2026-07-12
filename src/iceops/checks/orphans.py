@@ -19,7 +19,7 @@ def orphan_files(m: TableMetrics) -> Optional[Finding]:
             f"~{human_bytes(m.orphan_bytes_estimate)} in the table location is not "
             f"referenced by any snapshot"
         ),
-        recommendation="clean orphan files (iceops clean-orphans, v0.2); failed writes and "
+        recommendation="clean orphan files (iceops clean-orphans); failed writes and "
         "past compactions leave dead files that storage still bills for",
         data={"orphan_bytes_estimate": m.orphan_bytes_estimate},
     )

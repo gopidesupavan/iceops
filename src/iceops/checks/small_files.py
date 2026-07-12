@@ -25,8 +25,8 @@ def small_files(m: TableMetrics) -> Optional[Finding]:
             f"{m.small_file_count} of {m.data_file_count} data files "
             f"({m.small_file_ratio:.0%}) are under 32MB (avg {human_bytes(m.avg_file_bytes)})"
         ),
-        recommendation="compact the table (iceops compact, v0.2) or via your engine's "
-        "rewrite_data_files; queries pay an open-file cost per small file",
+        recommendation="compact the table (iceops compact --engine spark|trino); "
+        "queries pay an open-file cost per small file",
         data={
             "small_file_count": m.small_file_count,
             "data_file_count": m.data_file_count,

@@ -20,7 +20,10 @@ options are hand-rolled Spark maintenance jobs per table, or deploying and opera
 management platform. iceops is the third option: a CLI-first tool that diagnoses, fixes, and
 continuously maintains Iceberg tables from your laptop, your CI, or your existing scheduler.
 
-See [VISION.md](VISION.md) for goals and (importantly) non-goals.
+**Documentation:** [Quickstart](docs/quickstart.md) · [Concepts](docs/concepts.md) ·
+[Command reference](docs/commands.md) · [Policy (`iceops.yaml`)](docs/policy.md) ·
+[Engines](docs/engines.md). See [VISION.md](VISION.md) for goals and (importantly)
+non-goals.
 
 ## The mental model
 
