@@ -7,7 +7,16 @@ from ..models import Action, ActionResult, Plan
 from .base import Engine
 from .native import NativeEngine
 
-__all__ = ["Engine", "get_engine", "submit"]
+__all__ = ["Engine", "get_engine", "submit", "validate_engine", "SUPPORTED_ENGINES"]
+
+SUPPORTED_ENGINES = ("spark", "trino")
+
+
+def validate_engine(engine: str) -> None:
+    """Reject an unknown engine name up front (in dry-run too), so a typo fails fast
+    instead of only surfacing at execute time."""
+    if engine not in SUPPORTED_ENGINES:
+        raise IceopsError(f"unknown engine '{engine}' (expected spark or trino)")
 
 
 def get_engine(name: str = "native", **config: Any) -> Engine:

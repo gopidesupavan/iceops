@@ -40,7 +40,7 @@ import datetime as dt
 from typing import TYPE_CHECKING, Optional
 
 from ..catalog.detect import STREAMING_SNAPSHOTS_PER_DAY, managed_by
-from ..engines import submit
+from ..engines import submit, validate_engine
 from ..errors import IceopsError, TableNotFoundError
 from ..models import ExpireCandidate, ExpirePlan, ExpireResult
 
@@ -96,6 +96,7 @@ def expire(
         )
 
     if engine is not None:
+        validate_engine(engine)
         return _expire_via_engine(
             table,
             identifier,

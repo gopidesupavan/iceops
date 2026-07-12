@@ -403,6 +403,62 @@ class TestTuneJourney:
 
 
 @pytest.fixture(scope="module")
+def engine_flag_workspace(tmp_path_factory):
+    workspace, catalog = make_workspace(tmp_path_factory, "engineflag")
+    table = catalog.create_table("db.events", schema=batch(1).schema)
+    for i in range(6):
+        table.append(batch(i * 300))
+    return workspace
+
+
+class TestEngineFlagJourney:
+    """The --engine CLI path through the real binary, in dry-run (no cluster needed) —
+    exercises flag parsing, engine-catalog resolution, config load, and the engine-mode
+    renderer that the direct-call engine labs bypass."""
+
+    @pytest.fixture()
+    def workspace(self, engine_flag_workspace):
+        return engine_flag_workspace
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            ("expire", "db.events", "--older-than", "0s"),
+            ("rewrite-manifests", "db.events"),
+            ("clean-orphans", "db.events", "--older-than", "0s"),
+        ],
+    )
+    def test_engine_dry_run_renders_engine_plan(self, workspace, command):
+        result = iceops(*command, "--catalog", "e2e", "--engine", "spark", cwd=workspace)
+        assert result.returncode == 1, result.stdout + result.stderr  # actionable, dry run
+        assert "via spark" in result.stdout
+        assert "DRY RUN" in result.stdout
+
+    def test_engine_json_carries_engine_field(self, workspace):
+        result = iceops(
+            "expire",
+            "db.events",
+            "--catalog",
+            "e2e",
+            "--engine",
+            "trino",
+            "--older-than",
+            "0s",
+            "--json",
+            cwd=workspace,
+        )
+        assert result.returncode == 1
+        assert json.loads(result.stdout)["engine"] == "trino"
+
+    def test_unknown_engine_exits_2(self, workspace):
+        result = iceops(
+            "expire", "db.events", "--catalog", "e2e", "--engine", "bogus", cwd=workspace
+        )
+        assert result.returncode == 2
+        assert "unknown engine" in result.stderr.lower()
+
+
+@pytest.fixture(scope="module")
 def safety_workspace(tmp_path_factory):
     workspace, catalog = make_workspace(tmp_path_factory, "safety")
     table = catalog.create_table("db.managed", schema=batch(1).schema)

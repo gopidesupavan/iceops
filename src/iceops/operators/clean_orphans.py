@@ -129,6 +129,9 @@ def clean_orphans(
         )
 
     if engine is not None:
+        from ..engines import validate_engine
+
+        validate_engine(engine)
         return _clean_via_engine(
             table, identifier, older_than, engine, engine_catalog, engine_config, execute
         )

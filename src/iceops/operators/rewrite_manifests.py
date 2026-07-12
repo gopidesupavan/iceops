@@ -45,7 +45,7 @@ import math
 from typing import TYPE_CHECKING, Optional
 
 from ..catalog.detect import managed_by
-from ..engines import submit
+from ..engines import submit, validate_engine
 from ..errors import IceopsError, TableNotFoundError
 from ..models import RewriteManifestsPlan, RewriteManifestsResult
 
@@ -84,6 +84,7 @@ def rewrite_manifests(
         )
 
     if engine is not None:
+        validate_engine(engine)
         return _rewrite_via_engine(
             table,
             identifier,
