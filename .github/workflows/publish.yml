@@ -1,17 +1,5 @@
 name: publish
 
-# Publishes iceops to PyPI via Trusted Publishing (OIDC) — no API token stored.
-# Fires when a GitHub Release is published. Create the release from a tag like v0.1.0.
-#
-# One-time PyPI setup (project owner, in the PyPI web UI):
-#   Project 'iceops' -> Settings -> Publishing -> Add a trusted publisher (GitHub):
-#     Owner:       gopidesupavan
-#     Repository:  iceops
-#     Workflow:    publish.yml
-#     Environment: pypi
-#   Then create a GitHub environment named 'pypi' (Settings -> Environments),
-#   optionally with required reviewers so a human approves each release.
-
 on:
   release:
     types: [published]
