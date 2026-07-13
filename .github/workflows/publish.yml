@@ -10,10 +10,10 @@ jobs:
     name: build sdist + wheel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
 
@@ -33,7 +33,7 @@ jobs:
         run: uvx twine check dist/*
 
       - name: Upload dist artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
@@ -47,10 +47,10 @@ jobs:
       id-token: write  # required for Trusted Publishing (OIDC)
     steps:
       - name: Download dist artifact
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe2ac6f9ee81bab5 # release/v1
+        uses: pypa/gh-action-pypi-publish@release/v1
